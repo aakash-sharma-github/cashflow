@@ -7,7 +7,7 @@ import { format, formatDistanceToNow, isToday, isYesterday } from 'date-fns'
 export function formatAmount(amount: number, currency = 'USD'): string {
   const currencySymbols: Record<string, string> = {
     USD: '$', EUR: '€', GBP: '£', INR: '₹',
-    AED: 'د.إ', SAR: '﷼', PKR: '₨', BDT: '৳',
+    AED: 'د.إ', SAR: '﷼', NPR: 'रू', BDT: '৳',
   }
   const symbol = currencySymbols[currency] || currency
   const formatted = Math.abs(amount).toLocaleString('en-US', {

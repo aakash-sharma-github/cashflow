@@ -9,6 +9,7 @@ import { LinearGradient } from 'expo-linear-gradient'
 import { Ionicons } from '@expo/vector-icons'
 import { useEntriesStore } from '../store/entriesStore'
 import { COLORS, SPACING, BORDER_RADIUS, FONT_SIZE, SHADOW } from '../constants'
+import { useThemeStore, getTheme } from '../store/themeStore'
 import { isValidAmount, formatDateForDisplay } from '../utils'
 import type { EntryType } from '../types'
 
@@ -21,6 +22,8 @@ export default function AddEditEntryScreen({ route, navigation }: any) {
   const [note, setNote] = useState(isEditing ? (entry.note || '') : '')
   const [loading, setLoading] = useState(false)
   const { createEntry, updateEntry } = useEntriesStore()
+  const { mode } = useThemeStore()
+  const theme = getTheme(mode)
 
   const isCashIn = type === 'cash_in'
   const accentColor = isCashIn ? COLORS.cashIn : COLORS.cashOut
@@ -42,12 +45,12 @@ export default function AddEditEntryScreen({ route, navigation }: any) {
   }
 
   const currencySymbols: Record<string, string> = {
-    USD: '$', EUR: '€', GBP: '£', INR: '₹', AED: 'د.إ', SAR: '﷼', PKR: '₨', BDT: '৳',
+    USD: '$', EUR: '€', GBP: '£', INR: '₹', NPR: 'रू', AED: 'د.إ', SAR: '﷼', BDT: '৳',
   }
   const symbol = currencySymbols[currency] || currency
 
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['bottom']}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
@@ -159,7 +162,7 @@ export default function AddEditEntryScreen({ route, navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background },
+  container: { flex: 1 },
   scroll: { padding: SPACING.lg, paddingBottom: SPACING.xl },
 
   typeRow: { flexDirection: 'row', gap: SPACING.sm, marginBottom: SPACING.xl },

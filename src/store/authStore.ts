@@ -16,7 +16,7 @@ interface AuthState {
   setUser: (user: Profile | null) => void
 }
 
-export const useAuthStore = create<AuthState>((set, get) => ({
+export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   isLoading: true,
   isAuthenticated: false,
@@ -26,7 +26,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const session = await authService.getSession()
       if (session) {
         const { data: profile } = await authService.getProfile()
-        set({ user: profile, isAuthenticated: true, isLoading: false })
+        set({ user: profile, isAuthenticated: !!profile, isLoading: false })
       } else {
         set({ user: null, isAuthenticated: false, isLoading: false })
       }
@@ -34,14 +34,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ user: null, isAuthenticated: false, isLoading: false })
     }
 
+    // Auth state listener — handles navigation after Google OAuth browser returns
     authService.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session) {
-        const { data: profile } = await authService.getProfile()
-        set({ user: profile, isAuthenticated: true })
+        // Small delay to ensure profile record exists (trigger may be async)
+        setTimeout(async () => {
+          const { data: profile } = await authService.getProfile()
+          set({ user: profile, isAuthenticated: true, isLoading: false })
+        }, 500)
       } else if (event === 'SIGNED_OUT') {
-        set({ user: null, isAuthenticated: false })
-      } else if (event === 'TOKEN_REFRESHED' && session) {
-        // Silently refresh — no UI change needed
+        set({ user: null, isAuthenticated: false, isLoading: false })
       }
     })
   },
@@ -60,12 +62,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     return { error: error ?? null }
   },
 
+  /**
+   * Google sign-in: the authService opens the browser and waits.
+   * On success, the SIGNED_IN event fires from onAuthStateChange above,
+   * which fetches the profile and sets isAuthenticated — navigating the app.
+   * The LoginScreen uses a finally block to always reset its loading state.
+   */
   signInWithGoogle: async () => {
     const { error } = await authService.signInWithGoogle()
-    if (!error) {
-      const { data: profile } = await authService.getProfile()
-      set({ user: profile, isAuthenticated: true })
-    }
+    // Don't call getProfile() here — onAuthStateChange handles it.
+    // Just pass the error signal back to the button.
     return { error: error ?? null }
   },
 

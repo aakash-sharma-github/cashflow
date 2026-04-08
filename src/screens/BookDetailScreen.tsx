@@ -70,10 +70,12 @@ export default function BookDetailScreen({ route, navigation }: any) {
       `Delete ${formatAmount(entry.amount, currentBook?.currency)} ${entry.type === 'cash_in' ? 'Cash In' : 'Cash Out'}?`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: async () => {
-          const { error } = await deleteEntry(entry.id, bookId)
-          if (error) Alert.alert('Error', error)
-        }},
+        {
+          text: 'Delete', style: 'destructive', onPress: async () => {
+            const { error } = await deleteEntry(entry.id, bookId)
+            if (error) Alert.alert('Error', error)
+          }
+        },
       ]
     )
   }
@@ -123,18 +125,18 @@ export default function BookDetailScreen({ route, navigation }: any) {
         <View style={styles.summaryDeco2} />
         <Text style={styles.summaryLabel}>Net Balance</Text>
         <Text style={styles.summaryBalance}>{formatAmount(Math.abs(bal), currentBook?.currency)}</Text>
-        <Text style={styles.summarySubLabel}>{pos ? 'You\'re in the green 🎉' : 'You\'re in the red ⚠️'}</Text>
+        {/* <Text style={styles.summarySubLabel}>{pos ? 'You\'re in the green 🎉' : 'You\'re in the red ⚠️'}</Text> */}
 
         <View style={styles.summaryRow}>
           <View style={styles.summaryItem}>
             <Ionicons name="arrow-down" size={14} color="rgba(255,255,255,0.8)" />
-            <Text style={styles.summaryItemLabel}>  Cash In</Text>
+            {/* <Text style={styles.summaryItemLabel}>  Cash In</Text> */}
             <Text style={styles.summaryItemVal}>{formatAmount(summary?.cash_in || 0, currentBook?.currency)}</Text>
           </View>
           <View style={styles.summaryDiv} />
           <View style={styles.summaryItem}>
             <Ionicons name="arrow-up" size={14} color="rgba(255,255,255,0.8)" />
-            <Text style={styles.summaryItemLabel}>  Cash Out</Text>
+            {/* <Text style={styles.summaryItemLabel}>  Cash Out</Text> */}
             <Text style={styles.summaryItemVal}>{formatAmount(summary?.cash_out || 0, currentBook?.currency)}</Text>
           </View>
         </View>

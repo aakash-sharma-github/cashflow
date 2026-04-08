@@ -54,7 +54,7 @@ export const CURRENCIES = [
   { code: 'INR', symbol: '₹', name: 'Indian Rupee' },
   { code: 'AED', symbol: 'د.إ', name: 'UAE Dirham' },
   { code: 'SAR', symbol: '﷼', name: 'Saudi Riyal' },
-  { code: 'PKR', symbol: '₨', name: 'Pakistani Rupee' },
+  { code: 'NPR', symbol: 'रू', name: 'Nepali Rupee' },
   { code: 'BDT', symbol: '৳', name: 'Bangladeshi Taka' },
 ] as const
 
