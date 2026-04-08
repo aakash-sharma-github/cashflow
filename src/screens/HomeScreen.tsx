@@ -1,13 +1,16 @@
-// src/screens/HomeScreen.tsx
-import React, { useEffect, useCallback, useState } from 'react'
+// src/screens/HomeScreen.tsx — Redesigned v2
+import React, { useCallback, useState } from 'react'
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  ActivityIndicator, RefreshControl, Alert,
+  ActivityIndicator, RefreshControl, Alert, Pressable,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { LinearGradient } from 'expo-linear-gradient'
+import { Ionicons } from '@expo/vector-icons'
 import { useFocusEffect } from '@react-navigation/native'
 import { useBooksStore } from '../store/booksStore'
 import { useAuthStore } from '../store/authStore'
+import { useOfflineStore } from '../store/offlineStore'
 import { COLORS, SPACING, BORDER_RADIUS, FONT_SIZE, SHADOW } from '../constants'
 import { formatAmount, getInitials } from '../utils'
 import type { Book } from '../types'
@@ -15,13 +18,10 @@ import type { Book } from '../types'
 export default function HomeScreen({ navigation }: any) {
   const { books, isLoading, fetchBooks, deleteBook } = useBooksStore()
   const { user, signOut } = useAuthStore()
+  const { isOnline, pendingQueue } = useOfflineStore()
   const [refreshing, setRefreshing] = useState(false)
 
-  useFocusEffect(
-    useCallback(() => {
-      fetchBooks()
-    }, [])
-  )
+  useFocusEffect(useCallback(() => { fetchBooks() }, []))
 
   const onRefresh = async () => {
     setRefreshing(true)
@@ -29,126 +29,171 @@ export default function HomeScreen({ navigation }: any) {
     setRefreshing(false)
   }
 
-  const handleDeleteBook = (book: Book) => {
-    if (book.role !== 'owner') {
-      Alert.alert('Permission Denied', 'Only the book owner can delete it.')
-      return
+  const handleLongPress = (book: Book) => {
+    const options: any[] = [{ text: 'Cancel', style: 'cancel' }]
+    if (book.role === 'owner') {
+      options.push({
+        text: 'Edit',
+        onPress: () => navigation.navigate('CreateBook', { book }),
+      })
+      options.push({
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => Alert.alert(
+          `Delete "${book.name}"?`,
+          'All entries will be permanently deleted.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Delete', style: 'destructive', onPress: async () => {
+              const { error } = await deleteBook(book.id)
+              if (error) Alert.alert('Error', error)
+            }},
+          ]
+        ),
+      })
     }
-    Alert.alert(
-      `Delete "${book.name}"?`,
-      'All entries will be permanently deleted. This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            const { error } = await deleteBook(book.id)
-            if (error) Alert.alert('Error', error)
-          },
-        },
-      ]
-    )
+    Alert.alert(book.name, 'Choose an action', options)
   }
 
-  const renderBook = ({ item: book }: { item: Book }) => {
+  const totalBalance = books.reduce((s, b) => s + (b.balance || 0), 0)
+
+  const renderHeader = () => (
+    <View>
+      {/* Top bar */}
+      <View style={styles.topBar}>
+        <View>
+          <Text style={styles.greeting}>Good {getGreeting()},</Text>
+          <Text style={styles.userName} numberOfLines={1}>
+            {user?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'there'} 👋
+          </Text>
+        </View>
+        <TouchableOpacity
+          style={styles.avatarBtn}
+          onPress={() => Alert.alert(
+            user?.full_name || user?.email || 'Account',
+            user?.email,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Sign Out', style: 'destructive', onPress: signOut },
+            ]
+          )}
+        >
+          {user?.avatar_url ? null : (
+            <LinearGradient colors={['#5B5FED', '#7C3AED']} style={styles.avatarGrad}>
+              <Text style={styles.avatarInitial}>
+                {getInitials(user?.full_name || user?.email || '?')}
+              </Text>
+            </LinearGradient>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {/* Net balance card */}
+      <LinearGradient colors={['#5B5FED', '#7C3AED']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.balanceCard}>
+        <View style={styles.balanceCardDeco1} />
+        <View style={styles.balanceCardDeco2} />
+        <Text style={styles.balanceLabel}>Total Net Balance</Text>
+        <Text style={styles.balanceAmount}>
+          {totalBalance >= 0 ? '+' : ''}{formatAmount(Math.abs(totalBalance))}
+        </Text>
+        <View style={styles.balanceMeta}>
+          <View style={styles.balanceMetaItem}>
+            <Ionicons name="albums-outline" size={14} color="rgba(255,255,255,0.7)" />
+            <Text style={styles.balanceMetaText}>{books.length} book{books.length !== 1 ? 's' : ''}</Text>
+          </View>
+          {!isOnline && (
+            <View style={styles.offlinePill}>
+              <Ionicons name="cloud-offline-outline" size={13} color="rgba(255,255,255,0.9)" />
+              <Text style={styles.offlinePillText}>
+                {pendingQueue.length > 0 ? `${pendingQueue.length} pending` : 'Offline'}
+              </Text>
+            </View>
+          )}
+        </View>
+      </LinearGradient>
+
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>My Books</Text>
+        <Text style={styles.sectionCount}>{books.length}</Text>
+      </View>
+    </View>
+  )
+
+  const renderBook = ({ item: book, index }: { item: Book; index: number }) => {
     const isPositive = (book.balance || 0) >= 0
     return (
-      <TouchableOpacity
-        style={styles.bookCard}
+      <Pressable
+        style={({ pressed }) => [styles.bookCard, pressed && styles.bookCardPressed]}
         onPress={() => navigation.navigate('BookDetail', { bookId: book.id, bookName: book.name })}
-        onLongPress={() => handleDeleteBook(book)}
-        activeOpacity={0.8}
+        onLongPress={() => handleLongPress(book)}
       >
-        {/* Color accent */}
+        {/* Left accent */}
         <View style={[styles.bookAccent, { backgroundColor: book.color }]} />
 
-        <View style={styles.bookContent}>
+        <View style={styles.bookBody}>
           <View style={styles.bookTop}>
-            <View style={styles.bookIconRow}>
-              <View style={[styles.bookIcon, { backgroundColor: book.color + '20' }]}>
-                <Text style={styles.bookIconText}>
-                  {getInitials(book.name)}
-                </Text>
-              </View>
+            {/* Icon */}
+            <View style={[styles.bookIcon, { backgroundColor: book.color + '18' }]}>
+              <Ionicons name="book-outline" size={20} color={book.color} />
+            </View>
+
+            <View style={styles.bookInfo}>
+              <Text style={styles.bookName} numberOfLines={1}>{book.name}</Text>
               <View style={styles.bookMeta}>
-                <Text style={styles.bookName} numberOfLines={1}>{book.name}</Text>
-                <Text style={styles.bookRole}>
-                  {book.role === 'owner' ? '👑 Owner' : '👤 Member'} · {book.member_count || 1} member{(book.member_count || 1) > 1 ? 's' : ''}
-                </Text>
+                {book.role === 'owner'
+                  ? <><Ionicons name="star" size={11} color={COLORS.warning} /><Text style={styles.bookRoleText}> Owner</Text></>
+                  : <><Ionicons name="person-outline" size={11} color={COLORS.textTertiary} /><Text style={styles.bookRoleText}> Member</Text></>
+                }
+                <Text style={styles.bookMetaDot}> · </Text>
+                <Ionicons name="people-outline" size={11} color={COLORS.textTertiary} />
+                <Text style={styles.bookRoleText}> {book.member_count || 1}</Text>
               </View>
             </View>
-            <View style={[
-              styles.balanceBadge,
-              { backgroundColor: isPositive ? COLORS.cashInLight : COLORS.cashOutLight }
-            ]}>
-              <Text style={[
-                styles.balanceText,
-                { color: isPositive ? COLORS.cashIn : COLORS.cashOut }
-              ]}>
+
+            {/* Balance */}
+            <View style={[styles.balancePill, { backgroundColor: isPositive ? COLORS.cashInLight : COLORS.cashOutLight }]}>
+              <Text style={[styles.balancePillText, { color: isPositive ? COLORS.cashIn : COLORS.cashOut }]}>
                 {isPositive ? '+' : '-'}{formatAmount(Math.abs(book.balance || 0), book.currency)}
               </Text>
             </View>
           </View>
 
-          <View style={styles.bookStats}>
+          {/* Stats row */}
+          <View style={styles.statsRow}>
             <View style={styles.statItem}>
-              <View style={styles.statDot} />
+              <View style={[styles.statDot, { backgroundColor: COLORS.cashIn }]} />
               <Text style={styles.statLabel}>In </Text>
-              <Text style={[styles.statValue, { color: COLORS.cashIn }]}>
+              <Text style={[styles.statVal, { color: COLORS.cashIn }]}>
                 {formatAmount(book.cash_in || 0, book.currency)}
               </Text>
             </View>
-            <View style={styles.statDivider} />
+            <View style={styles.statSep} />
             <View style={styles.statItem}>
               <View style={[styles.statDot, { backgroundColor: COLORS.cashOut }]} />
               <Text style={styles.statLabel}>Out </Text>
-              <Text style={[styles.statValue, { color: COLORS.cashOut }]}>
+              <Text style={[styles.statVal, { color: COLORS.cashOut }]}>
                 {formatAmount(book.cash_out || 0, book.currency)}
               </Text>
             </View>
+            <Ionicons name="chevron-forward" size={16} color={COLORS.textTertiary} style={{ marginLeft: 'auto' }} />
           </View>
         </View>
-      </TouchableOpacity>
+      </Pressable>
     )
   }
 
   const renderEmpty = () => (
     <View style={styles.empty}>
-      <Text style={styles.emptyIcon}>📚</Text>
+      <LinearGradient colors={['#EEEFFE', '#F5F7FF']} style={styles.emptyIcon}>
+        <Ionicons name="albums-outline" size={40} color={COLORS.primary} />
+      </LinearGradient>
       <Text style={styles.emptyTitle}>No books yet</Text>
-      <Text style={styles.emptySubtitle}>
-        Create your first book to start tracking cash flow.
-      </Text>
-    </View>
-  )
-
-  const renderHeader = () => (
-    <View style={styles.header}>
-      <View>
-        <Text style={styles.greeting}>
-          Hey, {user?.full_name?.split(' ')[0] || 'there'} 👋
-        </Text>
-        <Text style={styles.headerTitle}>Your Books</Text>
-      </View>
-      <TouchableOpacity
-        style={styles.profileBtn}
-        onPress={() => Alert.alert('Sign Out', 'Are you sure?', [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Sign Out', style: 'destructive', onPress: signOut },
-        ])}
-      >
-        <Text style={styles.profileInitial}>
-          {getInitials(user?.full_name || user?.email || '?')}
-        </Text>
-      </TouchableOpacity>
+      <Text style={styles.emptyBody}>Tap the + button to create your first book and start tracking cash flow.</Text>
     </View>
   )
 
   return (
     <SafeAreaView style={styles.container}>
-      {renderHeader()}
-
       {isLoading && books.length === 0 ? (
         <View style={styles.loader}>
           <ActivityIndicator size="large" color={COLORS.primary} />
@@ -158,104 +203,104 @@ export default function HomeScreen({ navigation }: any) {
           data={books}
           keyExtractor={b => b.id}
           renderItem={renderBook}
+          ListHeaderComponent={renderHeader}
           ListEmptyComponent={renderEmpty}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />
-          }
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
         />
       )}
 
       {/* FAB */}
-      <TouchableOpacity
-        style={styles.fab}
-        onPress={() => navigation.navigate('CreateBook')}
-        activeOpacity={0.9}
-      >
-        <Text style={styles.fabIcon}>+</Text>
+      <TouchableOpacity style={styles.fab} onPress={() => navigation.navigate('CreateBook')} activeOpacity={0.9}>
+        <LinearGradient colors={['#5B5FED', '#7C3AED']} style={styles.fabGrad}>
+          <Ionicons name="add" size={28} color="#fff" />
+        </LinearGradient>
       </TouchableOpacity>
     </SafeAreaView>
   )
 }
 
+function getGreeting() {
+  const h = new Date().getHours()
+  if (h < 12) return 'morning'
+  if (h < 17) return 'afternoon'
+  return 'evening'
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.md,
-    paddingBottom: SPACING.lg,
-  },
-  greeting: { fontSize: FONT_SIZE.sm, color: COLORS.textSecondary, marginBottom: 2 },
-  headerTitle: { fontSize: FONT_SIZE['2xl'], fontWeight: '800', color: COLORS.text, letterSpacing: -0.5 },
-  profileBtn: {
-    width: 40, height: 40,
-    borderRadius: BORDER_RADIUS.full,
-    backgroundColor: COLORS.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  profileInitial: { color: '#fff', fontWeight: '700', fontSize: FONT_SIZE.md },
   loader: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  list: { paddingHorizontal: SPACING.lg, paddingBottom: 120 },
-  bookCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: BORDER_RADIUS.lg,
-    marginBottom: SPACING.md,
-    flexDirection: 'row',
+  list: { paddingBottom: 110 },
+
+  topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: SPACING.lg, paddingTop: SPACING.md, paddingBottom: SPACING.lg },
+  greeting: { fontSize: FONT_SIZE.sm, color: COLORS.textSecondary },
+  userName: { fontSize: FONT_SIZE.xl, fontWeight: '800', color: COLORS.text, maxWidth: 220 },
+  avatarBtn: { width: 44, height: 44, borderRadius: 22, overflow: 'hidden', ...SHADOW.sm },
+  avatarGrad: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  avatarInitial: { color: '#fff', fontWeight: '800', fontSize: FONT_SIZE.lg },
+
+  balanceCard: {
+    marginHorizontal: SPACING.lg, borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.xl, marginBottom: SPACING.lg,
     overflow: 'hidden',
-    ...SHADOW.md,
-  },
-  bookAccent: { width: 4, minHeight: 100 },
-  bookContent: { flex: 1, padding: SPACING.md },
-  bookTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: SPACING.md },
-  bookIconRow: { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: SPACING.sm },
-  bookIcon: {
-    width: 40, height: 40,
-    borderRadius: BORDER_RADIUS.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: SPACING.sm,
-  },
-  bookIconText: { fontWeight: '800', fontSize: FONT_SIZE.sm, color: COLORS.text },
-  bookMeta: { flex: 1 },
-  bookName: { fontSize: FONT_SIZE.md, fontWeight: '700', color: COLORS.text, marginBottom: 2 },
-  bookRole: { fontSize: FONT_SIZE.xs, color: COLORS.textTertiary },
-  balanceBadge: {
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: SPACING.xs,
-    borderRadius: BORDER_RADIUS.full,
-  },
-  balanceText: { fontSize: FONT_SIZE.sm, fontWeight: '700' },
-  bookStats: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingTop: SPACING.sm,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-  },
-  statItem: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  statDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.cashIn, marginRight: 4 },
-  statLabel: { fontSize: FONT_SIZE.xs, color: COLORS.textTertiary },
-  statValue: { fontSize: FONT_SIZE.sm, fontWeight: '600' },
-  statDivider: { width: 1, height: 16, backgroundColor: COLORS.border, marginHorizontal: SPACING.sm },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80 },
-  emptyIcon: { fontSize: 56, marginBottom: SPACING.lg },
-  emptyTitle: { fontSize: FONT_SIZE.xl, fontWeight: '700', color: COLORS.text, marginBottom: SPACING.sm },
-  emptySubtitle: { fontSize: FONT_SIZE.sm, color: COLORS.textSecondary, textAlign: 'center', lineHeight: 22 },
-  fab: {
-    position: 'absolute',
-    bottom: SPACING.xl,
-    right: SPACING.lg,
-    width: 60, height: 60,
-    borderRadius: BORDER_RADIUS.full,
-    backgroundColor: COLORS.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
     ...SHADOW.lg,
   },
-  fabIcon: { fontSize: 28, color: '#fff', lineHeight: 32 },
+  balanceCardDeco1: { position: 'absolute', width: 180, height: 180, borderRadius: 90, backgroundColor: 'rgba(255,255,255,0.07)', top: -60, right: -40 },
+  balanceCardDeco2: { position: 'absolute', width: 120, height: 120, borderRadius: 60, backgroundColor: 'rgba(255,255,255,0.05)', bottom: -30, right: 60 },
+  balanceLabel: { fontSize: FONT_SIZE.sm, color: 'rgba(255,255,255,0.75)', fontWeight: '600', marginBottom: 6 },
+  balanceAmount: { fontSize: 36, fontWeight: '900', color: '#fff', letterSpacing: -1, marginBottom: SPACING.md },
+  balanceMeta: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
+  balanceMetaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  balanceMetaText: { fontSize: FONT_SIZE.xs, color: 'rgba(255,255,255,0.75)' },
+  offlinePill: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    paddingHorizontal: 10, paddingVertical: 3, borderRadius: 20,
+  },
+  offlinePillText: { fontSize: FONT_SIZE.xs, color: 'rgba(255,255,255,0.9)', fontWeight: '600' },
+
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: SPACING.lg, marginBottom: SPACING.sm },
+  sectionTitle: { fontSize: FONT_SIZE.md, fontWeight: '800', color: COLORS.text, flex: 1 },
+  sectionCount: {
+    fontSize: FONT_SIZE.xs, fontWeight: '700', color: COLORS.primary,
+    backgroundColor: COLORS.primaryLight, paddingHorizontal: 8, paddingVertical: 2,
+    borderRadius: 10,
+  },
+
+  bookCard: {
+    flexDirection: 'row', backgroundColor: COLORS.surface,
+    marginHorizontal: SPACING.lg, marginBottom: 10,
+    borderRadius: BORDER_RADIUS.lg, overflow: 'hidden',
+    ...SHADOW.sm,
+  },
+  bookCardPressed: { opacity: 0.92, transform: [{ scale: 0.99 }] },
+  bookAccent: { width: 4 },
+  bookBody: { flex: 1, padding: SPACING.md },
+  bookTop: { flexDirection: 'row', alignItems: 'center', marginBottom: SPACING.sm },
+  bookIcon: { width: 42, height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginRight: SPACING.sm },
+  bookInfo: { flex: 1 },
+  bookName: { fontSize: FONT_SIZE.md, fontWeight: '700', color: COLORS.text, marginBottom: 2 },
+  bookMeta: { flexDirection: 'row', alignItems: 'center' },
+  bookRoleText: { fontSize: FONT_SIZE.xs, color: COLORS.textTertiary },
+  bookMetaDot: { fontSize: FONT_SIZE.xs, color: COLORS.textTertiary },
+  balancePill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+  balancePillText: { fontSize: FONT_SIZE.xs, fontWeight: '700' },
+  statsRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingTop: SPACING.sm, borderTopWidth: 1, borderTopColor: COLORS.border,
+  },
+  statItem: { flexDirection: 'row', alignItems: 'center' },
+  statDot: { width: 6, height: 6, borderRadius: 3, marginRight: 4 },
+  statLabel: { fontSize: FONT_SIZE.xs, color: COLORS.textTertiary },
+  statVal: { fontSize: FONT_SIZE.xs, fontWeight: '700' },
+  statSep: { width: 1, height: 12, backgroundColor: COLORS.border, marginHorizontal: SPACING.md },
+
+  empty: { alignItems: 'center', paddingTop: SPACING.xl, paddingHorizontal: SPACING.xl },
+  emptyIcon: { width: 80, height: 80, borderRadius: 24, alignItems: 'center', justifyContent: 'center', marginBottom: SPACING.lg },
+  emptyTitle: { fontSize: FONT_SIZE.xl, fontWeight: '800', color: COLORS.text, marginBottom: SPACING.sm },
+  emptyBody: { fontSize: FONT_SIZE.sm, color: COLORS.textSecondary, textAlign: 'center', lineHeight: 22 },
+
+  fab: { position: 'absolute', bottom: SPACING.xl, right: SPACING.lg, borderRadius: 30, overflow: 'hidden', ...SHADOW.lg },
+  fabGrad: { width: 58, height: 58, alignItems: 'center', justifyContent: 'center' },
 })

@@ -42,7 +42,7 @@ Track cash flow across multiple ledger books, collaborate in real time, and invi
 ### 1. Clone & Install
 
 ```bash
-git clone <your-repo>
+git clone https://github.com/aakash-sharma-github/cashflow.git
 cd cashflow
 npm install
 ```

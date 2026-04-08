@@ -43,7 +43,6 @@ todos.txt
 # local env files
 .env*.local
 .env
-.env.example
 
 # typescript
 *.tsbuildinfo

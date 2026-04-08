@@ -1,49 +1,50 @@
-// src/constants/index.ts
+// src/constants/index.ts  — Design System v2
 
 export const COLORS = {
-  primary: '#6366F1',
-  primaryDark: '#4F46E5',
-  primaryLight: '#EEF2FF',
+  // Brand
+  primary: '#5B5FED',
+  primaryDark: '#4347D9',
+  primaryLight: '#EEEFFE',
+  primaryGlow: 'rgba(91,95,237,0.15)',
 
-  cashIn: '#10B981',
-  cashInLight: '#D1FAE5',
-  cashInDark: '#059669',
+  // Semantic
+  cashIn: '#00C48C',
+  cashInLight: '#E6FBF4',
+  cashInDark: '#00A374',
 
-  cashOut: '#EF4444',
-  cashOutLight: '#FEE2E2',
-  cashOutDark: '#DC2626',
+  cashOut: '#FF647C',
+  cashOutLight: '#FFF0F2',
+  cashOutDark: '#E84560',
 
-  background: '#F9FAFB',
+  // Surfaces
+  background: '#F5F7FF',
   surface: '#FFFFFF',
-  surfaceSecondary: '#F3F4F6',
+  surfaceSecondary: '#F0F2FF',
+  surfaceElevated: '#FFFFFF',
 
-  text: '#111827',
+  // Text
+  text: '#0D0F1C',
   textSecondary: '#6B7280',
-  textTertiary: '#9CA3AF',
+  textTertiary: '#A0A8BA',
   textInverse: '#FFFFFF',
 
-  border: '#E5E7EB',
-  borderDark: '#D1D5DB',
+  // Borders
+  border: '#E8EAF6',
+  borderDark: '#D1D5F0',
 
-  success: '#10B981',
-  warning: '#F59E0B',
-  error: '#EF4444',
-  info: '#3B82F6',
+  // Status
+  success: '#00C48C',
+  warning: '#FFB020',
+  error: '#FF647C',
+  info: '#5B5FED',
 
-  overlay: 'rgba(0,0,0,0.5)',
+  overlay: 'rgba(13,15,28,0.55)',
 } as const
 
 export const BOOK_COLORS = [
-  '#6366F1', // Indigo
-  '#8B5CF6', // Violet
-  '#EC4899', // Pink
-  '#EF4444', // Red
-  '#F59E0B', // Amber
-  '#10B981', // Emerald
-  '#06B6D4', // Cyan
-  '#3B82F6', // Blue
-  '#84CC16', // Lime
-  '#F97316', // Orange
+  '#5B5FED', '#7C3AED', '#DB2777', '#DC2626',
+  '#D97706', '#059669', '#0891B2', '#2563EB',
+  '#65A30D', '#EA580C',
 ] as const
 
 export const CURRENCIES = [
@@ -58,61 +59,47 @@ export const CURRENCIES = [
 ] as const
 
 export const SPACING = {
-  xs: 4,
-  sm: 8,
-  md: 16,
-  lg: 24,
-  xl: 32,
-  '2xl': 48,
+  xs: 4, sm: 8, md: 16, lg: 24, xl: 32, '2xl': 48,
 } as const
 
 export const BORDER_RADIUS = {
-  sm: 6,
-  md: 10,
-  lg: 16,
-  xl: 24,
-  full: 9999,
+  sm: 8, md: 12, lg: 18, xl: 24, '2xl': 32, full: 9999,
 } as const
 
 export const FONT_SIZE = {
-  xs: 11,
-  sm: 13,
-  md: 15,
-  lg: 17,
-  xl: 20,
-  '2xl': 24,
-  '3xl': 30,
-  '4xl': 36,
+  xs: 11, sm: 13, md: 15, lg: 17, xl: 20,
+  '2xl': 24, '3xl': 30, '4xl': 38,
 } as const
 
 export const SHADOW = {
   sm: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
+    shadowColor: '#5B5FED',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
     elevation: 2,
   },
   md: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 4,
+    shadowColor: '#5B5FED',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.10,
+    shadowRadius: 16,
+    elevation: 5,
   },
   lg: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.12,
-    shadowRadius: 24,
-    elevation: 8,
+    shadowColor: '#5B5FED',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.18,
+    shadowRadius: 28,
+    elevation: 10,
   },
-} as const
-
-export const ANIMATION_DURATION = {
-  fast: 150,
-  normal: 250,
-  slow: 400,
+  colored: (color: string) => ({
+    shadowColor: color,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 8,
+  }),
 } as const
 
 export const PAGE_SIZE = 30

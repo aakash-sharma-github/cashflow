@@ -1,6 +1,6 @@
 {
   "name": "cashflow",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {
     "start": "expo start",
@@ -10,6 +10,7 @@
     "lint": "eslint src --ext .ts,.tsx"
   },
   "dependencies": {
+    "@expo/vector-icons": "^14.0.2",
     "@react-native-async-storage/async-storage": "1.23.1",
     "@react-native-community/netinfo": "11.3.2",
     "@react-navigation/bottom-tabs": "^6.5.20",
@@ -18,13 +19,17 @@
     "@supabase/supabase-js": "^2.43.5",
     "date-fns": "^3.6.0",
     "expo": "~51.0.18",
+    "expo-auth-session": "~5.5.2",
     "expo-build-properties": "~0.12.5",
     "expo-document-picker": "~12.0.2",
     "expo-file-system": "~17.0.1",
+    "expo-linear-gradient": "~13.0.2",
     "expo-print": "~13.0.1",
+    "expo-router": "~3.5.24",
     "expo-secure-store": "~13.0.2",
     "expo-sharing": "~12.0.1",
     "expo-status-bar": "~1.12.1",
+    "expo-web-browser": "~13.0.3",
     "react": "18.2.0",
     "react-native": "0.74.3",
     "react-native-gesture-handler": "~2.17.1",

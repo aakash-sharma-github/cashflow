@@ -2,14 +2,14 @@
   "expo": {
     "name": "CashFlow",
     "slug": "cashflow",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#F9FAFB"
+      "backgroundColor": "#5B5FED"
     },
     "ios": {
       "supportsTablet": false,
@@ -21,9 +21,24 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#F9FAFB"
+        "backgroundColor": "#5B5FED"
       },
-      "package": "com.yourcompany.cashflow"
+      "package": "com.yourcompany.cashflow",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "cashflow"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -31,6 +46,7 @@
     "scheme": "cashflow",
     "plugins": [
       "expo-secure-store",
+      "expo-router",
       [
         "expo-build-properties",
         {
