@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons'
 
 import { useAuthStore } from '../store/authStore'
 import { useThemeStore, getTheme } from '../store/themeStore'
+import { useInboxStore } from '../store/inboxStore'
 import { COLORS, FONT_SIZE, SHADOW, SPACING } from '../constants'
 
 import LoginScreen from '../screens/LoginScreen'
@@ -30,7 +31,6 @@ import OfflineBanner from '../components/common/OfflineBanner'
 const Stack = createStackNavigator()
 const Tab = createBottomTabNavigator()
 
-// Tab icon config
 const TAB_ICONS: Record<string, { active: string; inactive: string }> = {
   Home: { active: 'albums', inactive: 'albums-outline' },
   Notifications: { active: 'notifications', inactive: 'notifications-outline' },
@@ -50,6 +50,26 @@ function AuthStack () {
   )
 }
 
+function InboxTabIcon ({ focused, color }: { focused: boolean; color: string }) {
+  const unreadCount = useInboxStore(s => s.unreadCount)
+  return (
+    <View style={[styles.tabIconWrap, focused && styles.tabIconActive]}>
+      <Ionicons
+        name={(focused ? 'notifications' : 'notifications-outline') as any}
+        size={21}
+        color={color}
+      />
+      {unreadCount > 0 && (
+        <View style={styles.tabBadge}>
+          <Text style={styles.tabBadgeText}>
+            {unreadCount > 9 ? '9+' : unreadCount}
+          </Text>
+        </View>
+      )}
+    </View>
+  )
+}
+
 function MainTabs () {
   const { mode } = useThemeStore()
   const theme = getTheme(mode)
@@ -65,7 +85,11 @@ function MainTabs () {
         tabBarActiveTintColor: COLORS.primary,
         tabBarInactiveTintColor: theme.textTertiary,
         tabBarLabelStyle: styles.tabLabel,
-        tabBarIcon: ({ focused }) => {
+        tabBarIcon: ({ focused, color }) => {
+          // Inbox tab gets special badge treatment
+          if (route.name === 'Notifications') {
+            return <InboxTabIcon focused={focused} color={color} />
+          }
           const icons = TAB_ICONS[route.name] || {
             active: 'ellipse',
             inactive: 'ellipse-outline'
@@ -75,7 +99,7 @@ function MainTabs () {
               <Ionicons
                 name={(focused ? icons.active : icons.inactive) as any}
                 size={21}
-                color={focused ? COLORS.primary : theme.textTertiary}
+                color={color}
               />
             </View>
           )
@@ -175,7 +199,6 @@ export default function RootNavigator () {
   const { mode } = useThemeStore()
   const theme = getTheme(mode)
 
-  // React Navigation theme object for background consistency
   const navTheme =
     mode === 'dark'
       ? {
@@ -236,6 +259,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5
   },
   splashSub: { fontSize: FONT_SIZE.sm, color: 'rgba(255,255,255,0.7)' },
+
   tabBar: {
     height: 62,
     paddingBottom: 8,
@@ -251,5 +275,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center'
   },
-  tabIconActive: { backgroundColor: COLORS.primaryLight }
+  tabIconActive: { backgroundColor: COLORS.primaryLight },
+
+  // Badge on the inbox tab icon
+  tabBadge: {
+    position: 'absolute',
+    top: -3,
+    right: -4,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: COLORS.cashOut,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+    borderWidth: 1.5,
+    borderColor: '#fff' // white ring for contrast
+  },
+  tabBadgeText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '800',
+    lineHeight: 11
+  }
 })

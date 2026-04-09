@@ -13,7 +13,7 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.yourcompany.cashflow",
+      "bundleIdentifier": "com.cashflow.cashflow",
       "infoPlist": {
         "NSFaceIDUsageDescription": "Used for secure authentication"
       }
@@ -23,7 +23,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#5B5FED"
       },
-      "package": "com.yourcompany.cashflow",
+      "package": "com.cashflow.cashflow",
       "intentFilters": [
         {
           "action": "VIEW",

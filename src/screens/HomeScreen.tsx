@@ -70,52 +70,7 @@ export default function HomeScreen({ navigation }: any) {
             {user?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'there'}
           </Text>
         </View>
-        {/* Avatar — tapping navigates to Settings tab */}
-        {/* commented because it's not needed */}
-        {/* <TouchableOpacity
-          style={styles.avatarBtn}
-          onPress={() => navigation.navigate('Settings')}
-          activeOpacity={0.85}
-        >
-          <LinearGradient colors={['#5B5FED', '#7C3AED']} style={styles.avatarGrad}>
-            <Text style={styles.avatarInitial}>
-              {getInitials(user?.full_name || user?.email || '?')}
-            </Text>
-          </LinearGradient>
-        </TouchableOpacity> */}
-      </View>
-
-      {/*  balance card */}
-      {/* commented because it's not needed */}
-      {/* <LinearGradient
-        colors={['#5B5FED', '#7C3AED']}
-        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        style={styles.balanceCard}
-      >
-        <View style={styles.balanceCardDeco1} />
-        <View style={styles.balanceCardDeco2} />
-        <Text style={styles.balanceLabel}>Total Net Balance</Text>
-        <Text style={styles.balanceAmount}>
-          {totalBalance >= 0 ? '+' : ''}
-          {formatAmount(Math.abs(totalBalance))}s
-        </Text>
-        <View style={styles.balanceMeta}>
-          <View style={styles.balanceMetaItem}>
-            <Ionicons name="albums-outline" size={14} color="rgba(255,255,255,0.7)" />
-            <Text style={styles.balanceMetaText}>
-              {books.length} book{books.length !== 1 ? 's' : ''}
-            </Text>
-          </View>
-          {!isOnline && (
-            <View style={styles.offlinePill}>
-              <Ionicons name="cloud-offline-outline" size={13} color="rgba(255,255,255,0.9)" />
-              <Text style={styles.offlinePillText}>
-                {pendingQueue.length > 0 ? `${pendingQueue.length} pending` : 'Offline'}
-              </Text>
-            </View>
-          )}
-        </View>
-      </LinearGradient> */}
+      </View>     
 
       {/* Section header */}
       <View style={styles.sectionRow}>
