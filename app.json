@@ -23,6 +23,10 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#5B5FED"
       },
+      "notification": {
+        "icon": "./assets/notification-icon.png",
+        "color": "#5B5FED"
+      },
       "package": "com.cashflow.cashflow",
       "intentFilters": [
         {
