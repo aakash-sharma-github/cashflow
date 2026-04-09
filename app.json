@@ -65,8 +65,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "your-eas-project-id"
+        "projectId": "2dd5e903-ee74-4052-aa22-b8e1751a1ebf"
       }
-    }
+    },
+    "owner": "aakash-expo"
   }
 }
