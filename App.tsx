@@ -1,95 +1,64 @@
-import React, { useEffect, useState, useCallback } from 'react'
+// App.tsx
+import React, { useEffect } from 'react'
 import { StatusBar } from 'expo-status-bar'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
+import * as SplashScreen from 'expo-splash-screen'
 import RootNavigator from './src/navigation'
 import { useAuthStore } from './src/store/authStore'
 import { useThemeStore } from './src/store/themeStore'
 import { useOfflineSync } from './src/hooks/useOfflineSync'
-import * as SplashScreen from 'expo-splash-screen'
+import { usePushNotifications } from './src/hooks/usePushNotifications'
 
-SplashScreen.preventAutoHideAsync() // Keep splash screen visible
+// Keep the native splash visible until we explicitly hide it
+// This prevents the "white flash" between native splash and React render
+SplashScreen.preventAutoHideAsync().catch(() => {
+  // Already hidden — fine to ignore
+})
 
 function AppContent() {
   const initialize = useAuthStore(s => s.initialize)
+  const isLoading = useAuthStore(s => s.isLoading)
   const loadTheme = useThemeStore(s => s.load)
   const mode = useThemeStore(s => s.mode)
-  useOfflineSync()
 
-  const [appIsReady, setAppIsReady] = useState(false)
+  useOfflineSync()
+  usePushNotifications()
 
   useEffect(() => {
-    async function prepareApp() {
+    const boot = async () => {
       try {
-        await initialize() // Wait for auth initialization
-        await loadTheme()   // Wait for theme loading
-        // Any other async setup can go here
+        // Run both in parallel — neither should block the other
+        await Promise.all([
+          initialize(),
+          loadTheme(),
+        ])
       } catch (e) {
-        console.warn(e) // Log errors
+        console.warn('[App] boot error:', e)
       } finally {
-        setAppIsReady(true) // Mark app ready
+        // Always hide the native splash screen, even if something errored
+        SplashScreen.hideAsync().catch(() => { })
       }
     }
-    prepareApp()
+    boot()
   }, [])
 
-  const onLayoutRootView = useCallback(async () => {
-    if (appIsReady) {
-      await SplashScreen.hideAsync() // Hide splash only when ready
-    }
-  }, [appIsReady])
-
-  if (!appIsReady) {
-    return null // Keep splash visible
-  }
-
+  // isLoading drives our custom gradient splash (shown by RootNavigator)
+  // The native OS splash is gone by now; React renders immediately
   return (
-    <GestureHandlerRootView style={{ flex: 1 }} onLayout={onLayoutRootView}>
+    <>
+      <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />
+      <RootNavigator />
+    </>
+  )
+}
+
+export default function App() {
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />
-        <RootNavigator />
+        <AppContent />
       </SafeAreaProvider>
     </GestureHandlerRootView>
   )
 }
-
-export default AppContent
-
-
-// import React, { useEffect } from 'react'
-// import { StatusBar } from 'expo-status-bar'
-// import { GestureHandlerRootView } from 'react-native-gesture-handler'
-// import { SafeAreaProvider } from 'react-native-safe-area-context'
-// import RootNavigator from './src/navigation'
-// import { useAuthStore } from './src/store/authStore'
-// import { useThemeStore } from './src/store/themeStore'
-// import { useOfflineSync } from './src/hooks/useOfflineSync'
-
-// function AppContent() {
-//   const initialize = useAuthStore(s => s.initialize)
-//   const loadTheme = useThemeStore(s => s.load)
-//   const mode = useThemeStore(s => s.mode)
-//   useOfflineSync()
-
-//   useEffect(() => {
-//     initialize()
-//     loadTheme()
-//   }, [])
-
-//   return (
-//     <>
-//       <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />
-//       <RootNavigator />
-//     </>
-//   )
-// }
-
-// export default function App() {
-//   return (
-//     <GestureHandlerRootView style={{ flex: 1 }}>
-//       <SafeAreaProvider>
-//         <AppContent />
-//       </SafeAreaProvider>
-//     </GestureHandlerRootView>
-//   )
-// }

@@ -1,4 +1,15 @@
 // src/store/authStore.ts
+// CRITICAL FIX: initialize() must ALWAYS set isLoading=false.
+// Previous bug: if getSession() or getProfile() threw an unexpected error
+// that wasn't caught by the inner try/catch (e.g., network timeout during
+// session refresh, or Supabase client crash), isLoading stayed true forever
+// → splash screen freeze.
+//
+// Fixes applied:
+// 1. Outer try/finally guarantees isLoading=false no matter what
+// 2. Hard timeout on the whole initialize() — after 8s force isLoading=false
+// 3. Auth state listener registered OUTSIDE the try block so it always fires
+
 import { create } from 'zustand'
 import type { Profile } from '../types'
 import { authService } from '../services/authService'
@@ -22,6 +33,12 @@ export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
 
   initialize: async () => {
+    // Hard timeout — if everything hangs, unblock the app after 8 seconds
+    const timeout = setTimeout(() => {
+      console.warn('[Auth] initialize() timed out — forcing isLoading=false')
+      set({ user: null, isAuthenticated: false, isLoading: false })
+    }, 8000)
+
     try {
       const session = await authService.getSession()
       if (session) {
@@ -30,20 +47,28 @@ export const useAuthStore = create<AuthState>((set) => ({
       } else {
         set({ user: null, isAuthenticated: false, isLoading: false })
       }
-    } catch {
+    } catch (e) {
+      console.warn('[Auth] initialize error:', e)
       set({ user: null, isAuthenticated: false, isLoading: false })
+    } finally {
+      clearTimeout(timeout)
     }
 
-    // Auth state listener — handles navigation after Google OAuth browser returns
+    // Auth state listener — registered after initial load, always active
     authService.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session) {
-        // Small delay to ensure profile record exists (trigger may be async)
         setTimeout(async () => {
-          const { data: profile } = await authService.getProfile()
-          set({ user: profile, isAuthenticated: true, isLoading: false })
+          try {
+            const { data: profile } = await authService.getProfile()
+            set({ user: profile, isAuthenticated: true, isLoading: false })
+          } catch {
+            set({ isAuthenticated: true, isLoading: false })
+          }
         }, 500)
       } else if (event === 'SIGNED_OUT') {
         set({ user: null, isAuthenticated: false, isLoading: false })
+      } else if (event === 'TOKEN_REFRESHED') {
+        // Silently refresh — no navigation change needed
       }
     })
   },
@@ -62,22 +87,16 @@ export const useAuthStore = create<AuthState>((set) => ({
     return { error: error ?? null }
   },
 
-  /**
-   * Google sign-in: the authService opens the browser and waits.
-   * On success, the SIGNED_IN event fires from onAuthStateChange above,
-   * which fetches the profile and sets isAuthenticated — navigating the app.
-   * The LoginScreen uses a finally block to always reset its loading state.
-   */
   signInWithGoogle: async () => {
     const { error } = await authService.signInWithGoogle()
-    // Don't call getProfile() here — onAuthStateChange handles it.
-    // Just pass the error signal back to the button.
     return { error: error ?? null }
   },
 
   refreshProfile: async () => {
-    const { data: profile } = await authService.getProfile()
-    if (profile) set({ user: profile })
+    try {
+      const { data: profile } = await authService.getProfile()
+      if (profile) set({ user: profile })
+    } catch { }
   },
 
   signOut: async () => {
