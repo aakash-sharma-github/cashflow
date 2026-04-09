@@ -27,6 +27,9 @@ import NotificationsScreen from '../screens/NotificationsScreen'
 import ExportImportScreen from '../screens/ExportImportScreen'
 import SettingsScreen from '../screens/SettingsScreen'
 import OfflineBanner from '../components/common/OfflineBanner'
+import PrivacyPolicyScreen from '../screens/PrivacyPolicyScreen'
+import TermsScreen from '../screens/TermsScreen'
+import EditProfileScreen from '../screens/EditProfileScreen'
 
 const Stack = createStackNavigator()
 const Tab = createBottomTabNavigator()
@@ -37,7 +40,7 @@ const TAB_ICONS: Record<string, { active: string; inactive: string }> = {
   Settings: { active: 'settings', inactive: 'settings-outline' }
 }
 
-function AuthStack () {
+function AuthStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name='Login' component={LoginScreen} />
@@ -50,7 +53,7 @@ function AuthStack () {
   )
 }
 
-function InboxTabIcon ({ focused, color }: { focused: boolean; color: string }) {
+function InboxTabIcon({ focused, color }: { focused: boolean; color: string }) {
   const unreadCount = useInboxStore(s => s.unreadCount)
   return (
     <View style={[styles.tabIconWrap, focused && styles.tabIconActive]}>
@@ -70,7 +73,7 @@ function InboxTabIcon ({ focused, color }: { focused: boolean; color: string }) 
   )
 }
 
-function MainTabs () {
+function MainTabs() {
   const { mode } = useThemeStore()
   const theme = getTheme(mode)
 
@@ -125,7 +128,7 @@ function MainTabs () {
   )
 }
 
-function AppStack () {
+function AppStack() {
   const { mode } = useThemeStore()
   const theme = getTheme(mode)
 
@@ -189,12 +192,27 @@ function AppStack () {
           component={ExportImportScreen}
           options={{ title: 'Export & Import' }}
         />
+        <Stack.Screen
+          name='PrivacyPolicy'
+          component={PrivacyPolicyScreen}
+          options={{ title: 'Privacy Policy' }}
+        />
+        <Stack.Screen
+          name='Terms'
+          component={TermsScreen}
+          options={{ title: 'Terms and Conditions' }}
+        />
+        <Stack.Screen
+          name='EditProfile'
+          component={EditProfileScreen}
+          options={{ title: 'Edit Profile' }}
+        />
       </Stack.Navigator>
     </>
   )
 }
 
-export default function RootNavigator () {
+export default function RootNavigator() {
   const { isAuthenticated, isLoading } = useAuthStore()
   const { mode } = useThemeStore()
   const theme = getTheme(mode)
@@ -202,25 +220,25 @@ export default function RootNavigator () {
   const navTheme =
     mode === 'dark'
       ? {
-          ...DarkTheme,
-          colors: {
-            ...DarkTheme.colors,
-            background: theme.background,
-            card: theme.surface,
-            border: theme.border,
-            text: theme.text
-          }
+        ...DarkTheme,
+        colors: {
+          ...DarkTheme.colors,
+          background: theme.background,
+          card: theme.surface,
+          border: theme.border,
+          text: theme.text
         }
+      }
       : {
-          ...DefaultTheme,
-          colors: {
-            ...DefaultTheme.colors,
-            background: theme.background,
-            card: theme.surface,
-            border: theme.border,
-            text: theme.text
-          }
+        ...DefaultTheme,
+        colors: {
+          ...DefaultTheme.colors,
+          background: theme.background,
+          card: theme.surface,
+          border: theme.border,
+          text: theme.text
         }
+      }
 
   if (isLoading) {
     return (

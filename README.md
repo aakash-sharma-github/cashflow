@@ -1,20 +1,41 @@
 # 💰 CashFlow
 
-A production-grade mobile expense tracker built with React Native (Expo) + Supabase.
+> Smart, collaborative expense tracking for individuals and teams.
 
-Track cash flow across multiple ledger books, collaborate in real time, and invite team members.
+A production-grade mobile app built with **React Native (Expo)** + **Supabase**. Track cash flow across multiple ledger books, collaborate with teammates in real time, and stay on top of every rupee — online or offline.
 
 ---
 
 ## ✨ Features
 
-- **Magic Link Auth** — Sign in via email OTP, no passwords
-- **Multiple Books** — Create separate ledgers for Personal, Business, Family, etc.
-- **Cash In / Cash Out** — Track every transaction with notes
-- **Real-Time Sync** — Collaborators see changes instantly
-- **Invite System** — Invite others by email, accept/reject invitations
-- **Running Balance** — Always see your current position
-- **Optimistic UI** — Instant feedback, no loading spinners on actions
+### Core
+- 📧 **Magic Link + Google OAuth** — Sign in without a password
+- 📚 **Multiple Books** — Personal, Business, Family — keep everything separate
+- 💸 **Cash In / Cash Out** — Track every transaction with notes and a custom date/time picker
+- 📊 **Running Balance** — Always see your net position at a glance
+- 🎨 **Dark & Light Mode** — Persisted preference, applied app-wide
+
+### Collaboration
+- 👥 **Invite by Email** — Add collaborators to any book
+- 🔔 **Push Notifications** — Get notified the moment someone invites you
+- ⚡ **Real-Time Sync** — All members see changes instantly via Supabase Realtime
+- 🔐 **Row Level Security** — Only members can access their books
+
+### Offline First
+- 📴 **Offline CRUD** — Create, edit, delete entries and books without internet
+- 🔄 **Auto Sync** — Queued changes upload automatically when connectivity returns
+- 💾 **Local Cache** — All data cached to AsyncStorage, readable offline
+
+### Export & Import
+- 📊 **CSV Export** — Open in Excel, Google Sheets, Numbers
+- 📑 **PDF Export** — Branded report with summary + full transaction table
+- 📂 **CSV Import** — Bulk import entries from any CSV file with preview
+
+### Settings
+- 👤 **Edit Profile** — Update your display name
+- 🔒 **Privacy Policy** — Full in-app privacy policy page
+- 📜 **Terms & Conditions** — Full in-app terms page
+- 👥 **Members View** — See all people you've invited across your books
 
 ---
 
@@ -22,92 +43,61 @@ Track cash flow across multiple ledger books, collaborate in real time, and invi
 
 | Layer | Technology |
 |-------|-----------|
-| Mobile | React Native (Expo ~51) |
-| Backend | Supabase (PostgreSQL + Auth + Realtime) |
-| State | Zustand |
+| Mobile | React Native 0.74 (Expo ~51) |
+| Backend | Supabase (PostgreSQL + Auth + Realtime + Edge Functions) |
+| State | Zustand 4 |
 | Navigation | React Navigation v6 |
-| Storage | Expo SecureStore |
-| Email | Resend (free tier) via Supabase Edge Function |
+| Auth | Supabase Magic Link + Google OAuth |
+| Storage | Expo SecureStore (chunked) + AsyncStorage |
+| Push | Expo Notifications |
+| Export | expo-print + expo-sharing + expo-file-system |
+| Icons | @expo/vector-icons (Ionicons) |
+| Gradients | expo-linear-gradient |
 
 ---
 
-## 🚀 Setup
+## 🚀 Quick Start
 
 ### Prerequisites
 - Node.js 18+
 - Expo CLI: `npm install -g expo-cli`
-- Supabase account (free)
-- Resend account (free, for invite emails)
+- Physical device with Expo Go app (for push notifications)
+- Supabase account (free tier)
 
 ### 1. Clone & Install
-
 ```bash
 git clone https://github.com/aakash-sharma-github/cashflow.git
 cd cashflow
 npm install
 ```
 
-### 2. Create Supabase Project
-
-1. Go to https://supabase.com → New project
-2. Copy your **Project URL** and **anon public key**
-
-### 3. Run Database Migration
-
-1. Open Supabase → SQL Editor
-2. Copy the entire contents of `supabase/migrations/001_schema.sql`
-3. Paste and click **Run**
-
-### 4. Enable Realtime
-
-1. Supabase → Database → Replication
-2. Enable for tables: `entries`, `book_members`, `invitations`
-
-### 5. Configure Auth
-
-1. Supabase → Authentication → URL Configuration
-2. Add to **Redirect URLs**: `cashflow://auth/callback`
-3. Disable email confirmations (Settings → Auth → Email)
-
-### 6. Set Environment Variables
-
+### 2. Configure Environment
 ```bash
 cp .env.example .env
 ```
-
 Edit `.env`:
 ```env
 EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-public-key
+EXPO_PUBLIC_EAS_PROJECT_ID=your-eas-project-id
 ```
 
-### 7. Deploy Edge Function (for invite emails)
+### 3. Run Database Migrations
+In Supabase SQL Editor, run **in order**:
+1. `supabase/migrations/001_schema.sql`
+2. `supabase/migrations/002_fix_rls.sql`
+3. `supabase/migrations/003_fix_rls_final.sql` ← **Required**
 
-```bash
-# Install Supabase CLI
-npm install -g supabase
+### 4. Configure Supabase
+- **Auth → URL Configuration** → Add redirect: `cashflow://auth/callback`
+- **Auth → Providers** → Enable Google (add Client ID + Secret)
+- **Database → Replication** → Enable for: `entries`, `book_members`, `invitations`
 
-# Login
-supabase login
-
-# Link to your project
-supabase link --project-ref your-project-ref
-
-# Set secrets (get RESEND_API_KEY from resend.com)
-supabase secrets set RESEND_API_KEY=re_your_key
-supabase secrets set APP_URL=cashflow://auth/callback
-
-# Deploy function
-supabase functions deploy send-invite
-```
-
-### 8. Run the App
-
+### 5. Run the App
 ```bash
 npx expo start
 ```
-
-Scan the QR code with **Expo Go** app on your phone.
+Scan the QR code with Expo Go on your device.
 
 ---
 
@@ -115,70 +105,87 @@ Scan the QR code with **Expo Go** app on your phone.
 
 ```
 cashflow/
-├── App.tsx                     # Entry point
+├── App.tsx                         # Entry point
+├── assets/                         # Icons, splash, adaptive icon
 ├── src/
 │   ├── screens/
-│   │   ├── LoginScreen.tsx
-│   │   ├── VerifyOtpScreen.tsx
-│   │   ├── HomeScreen.tsx
-│   │   ├── BookDetailScreen.tsx
-│   │   ├── AddEditEntryScreen.tsx
-│   │   ├── CreateBookScreen.tsx
-│   │   ├── MembersScreen.tsx
-│   │   └── NotificationsScreen.tsx
+│   │   ├── LoginScreen.tsx         # Magic link + Google OAuth
+│   │   ├── VerifyOtpScreen.tsx     # OTP entry
+│   │   ├── HomeScreen.tsx          # Books list + balance
+│   │   ├── BookDetailScreen.tsx    # Entries + filter + balance
+│   │   ├── AddEditEntryScreen.tsx  # Entry form + datetime picker
+│   │   ├── CreateBookScreen.tsx    # Book create/edit
+│   │   ├── MembersScreen.tsx       # Invite + member management
+│   │   ├── NotificationsScreen.tsx # Invitation inbox
+│   │   ├── ExportImportScreen.tsx  # CSV/PDF export + import
+│   │   ├── SettingsScreen.tsx      # Theme, profile, members, about
+│   │   ├── EditProfileScreen.tsx   # Name update
+│   │   ├── PrivacyPolicyScreen.tsx # Full privacy policy
+│   │   └── TermsScreen.tsx        # Full terms & conditions
 │   ├── services/
-│   │   ├── supabase.ts          # Supabase client
-│   │   ├── authService.ts       # Auth operations
-│   │   ├── booksService.ts      # Books CRUD
-│   │   ├── entriesService.ts    # Entries CRUD
-│   │   └── invitationsService.ts # Invites + members
+│   │   ├── supabase.ts             # Chunked SecureStore client
+│   │   ├── authService.ts          # OTP + Google OAuth
+│   │   ├── booksService.ts         # Books CRUD
+│   │   ├── entriesService.ts       # Entries CRUD + paginated
+│   │   ├── invitationsService.ts   # Invites + members
+│   │   ├── localDb.ts              # AsyncStorage offline cache
+│   │   ├── syncService.ts          # Offline queue replay
+│   │   ├── exportService.ts        # CSV/PDF export + CSV import
+│   │   └── notificationService.ts  # Expo push notifications
 │   ├── store/
-│   │   ├── authStore.ts         # Zustand auth state
-│   │   ├── booksStore.ts        # Zustand books state
-│   │   └── entriesStore.ts      # Zustand entries state (with optimistic updates)
+│   │   ├── authStore.ts            # Session + user profile
+│   │   ├── booksStore.ts           # Books (offline-first)
+│   │   ├── entriesStore.ts         # Entries (offline-first)
+│   │   ├── offlineStore.ts         # Network state + op queue
+│   │   ├── inboxStore.ts           # Unread invitation count
+│   │   └── themeStore.ts           # Light/dark preference
 │   ├── hooks/
-│   │   └── useEntriesRealtime.ts # Supabase Realtime hooks
-│   ├── navigation/
-│   │   └── index.tsx            # Stack + Tab navigators
-│   ├── types/
-│   │   └── index.ts             # TypeScript interfaces
-│   ├── constants/
-│   │   └── index.ts             # Colors, spacing, config
-│   └── utils/
-│       └── index.ts             # Formatters, validators
+│   │   ├── useEntriesRealtime.ts   # Supabase realtime entries
+│   │   ├── useOfflineSync.ts       # Auto-sync on reconnect
+│   │   └── usePushNotifications.ts # Device registration + listener
+│   ├── navigation/index.tsx        # Stack + tab navigators
+│   ├── components/common/
+│   │   └── OfflineBanner.tsx       # Animated offline/sync indicator
+│   ├── types/index.ts
+│   ├── constants/index.ts          # Design tokens
+│   └── utils/index.ts
 ├── supabase/
 │   ├── migrations/
-│   │   └── 001_schema.sql       # Full DB schema + RLS
+│   │   ├── 001_schema.sql
+│   │   ├── 002_fix_rls.sql
+│   │   └── 003_fix_rls_final.sql
 │   └── functions/
-│       └── send-invite/
-│           └── index.ts         # Email edge function
-└── agents.md                   # Project context & progress
+│       └── send-invite/index.ts    # Resend email edge function
+└── production.md                   # Play Store + Expo publish guide
 ```
 
 ---
 
-## 🔐 Security Model
+## 🔐 Security
 
-All data access is protected by **Row Level Security (RLS)** in PostgreSQL:
+- Row Level Security on all tables — users only access their own data
+- JWT tokens chunked across SecureStore keys to bypass 2KB limit
+- SECURITY DEFINER functions for invitation accept/reject
+- Trigger functions use `SET search_path = public, pg_temp`
 
-- Users can only see books they're members of
-- Only book owners can delete books or rename them
-- Entries are accessible to all book members
-- Invitations are only visible to the sender and recipient
-- Accepting/rejecting invitations is handled by secure DB functions
+---
+
+## 📦 New Packages (run `npm install`)
+
+| Package | Purpose |
+|---------|---------|
+| `@react-native-community/datetimepicker` | Native date+time picker |
+| `expo-notifications` | Push notification infrastructure |
+| `expo-device` | Physical device detection |
 
 ---
 
 ## 🗺️ Roadmap
 
-- [ ] Offline-first support (WatermelonDB)
-- [ ] Push notifications (Expo Push)
-- [ ] Monthly analytics charts
-- [ ] CSV export
-- [ ] Dark mode
+See `agents.md` for detailed future scope checkpoints.
 
 ---
 
 ## 📝 License
 
-MIT
+MIT © 2026 CashFlow

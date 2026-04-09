@@ -22,6 +22,8 @@ web-build/
 # Development Builds
 ios/
 
+# Development based md files
+production.md
 
 # Metro
 .metro-health-check*

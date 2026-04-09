@@ -4,9 +4,8 @@
     "slug": "cashflow",
     "version": "1.1.0",
     "orientation": "portrait",
-    "entrypoint": "./App.tsx",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
@@ -16,7 +15,8 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.cashflow.cashflow",
       "infoPlist": {
-        "NSFaceIDUsageDescription": "Used for secure authentication"
+        "NSFaceIDUsageDescription": "Used for secure authentication",
+        "NSUserNotificationUsageDescription": "We send notifications when you receive book invitations."
       }
     },
     "android": {
@@ -25,6 +25,11 @@
         "backgroundColor": "#5B5FED"
       },
       "package": "com.cashflow.cashflow",
+      "permissions": [
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE",
+        "POST_NOTIFICATIONS"
+      ],
       "intentFilters": [
         {
           "action": "VIEW",
@@ -41,13 +46,25 @@
         }
       ]
     },
+    "notification": {
+      "icon": "./assets/notification-icon.png",
+      "color": "#5B5FED",
+      "androidMode": "default"
+    },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "scheme": "cashflow",
     "plugins": [
       "expo-secure-store",
-      "expo-router",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#5B5FED",
+          "sounds": []
+        }
+      ],
       [
         "expo-build-properties",
         {
@@ -58,8 +75,7 @@
             "newArchEnabled": true
           }
         }
-      ],
-      "expo-font"
+      ]
     ],
     "extra": {
       "eas": {

@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import {
     View, Text, ScrollView, TouchableOpacity, StyleSheet,
-    Switch, Image, Alert, Linking, ActivityIndicator,
+    Switch, Image, Alert, ActivityIndicator,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -23,7 +23,7 @@ export default function SettingsScreen({ navigation }: any) {
     const theme = getTheme(mode)
     const isDark = mode === 'dark'
 
-    const [allMembers, setAllMembers] = useState<(BookMember & { bookName: string; bookColor: string })[]>([])
+    const [allMembers, setAllMembers] = useState<BookMember[]>([])
     const [loadingMembers, setLoadingMembers] = useState(false)
 
     useFocusEffect(useCallback(() => {
@@ -33,15 +33,23 @@ export default function SettingsScreen({ navigation }: any) {
     const loadAllMembers = async () => {
         if (!books.length) return
         setLoadingMembers(true)
-        const results: (BookMember & { bookName: string; bookColor: string })[] = []
+        // Collect all members across all books, deduplicate by user_id,
+        // exclude the current user (they see themselves in the Profile section).
+        const seen = new Set<string>()
+        const unique: BookMember[] = []
         for (const book of books) {
             const { data } = await invitationsService.getBookMembers(book.id)
             if (data) {
-                data.forEach(m => results.push({ ...m, bookName: book.name, bookColor: book.color }))
+                for (const m of data) {
+                    // Skip self and skip if already added
+                    if (m.user_id === user?.id) continue
+                    if (seen.has(m.user_id)) continue
+                    seen.add(m.user_id)
+                    unique.push(m)
+                }
             }
         }
-        // Deduplicate by user_id, keeping unique members across all books
-        setAllMembers(results)
+        setAllMembers(unique)
         setLoadingMembers(false)
     }
 
@@ -84,7 +92,11 @@ export default function SettingsScreen({ navigation }: any) {
 
                 {/* ── Profile Section ─────────────────────────── */}
                 <SectionHeader title="Your Profile" />
-                <View style={[styles.card, { backgroundColor: theme.surface }]}>
+                <TouchableOpacity
+                    style={[styles.card, { backgroundColor: theme.surface }]}
+                    onPress={() => navigation.navigate('EditProfile')}
+                    activeOpacity={0.85}
+                >
                     {/* Avatar + name */}
                     <View style={styles.profileRow}>
                         <View style={styles.avatarWrap}>
@@ -121,7 +133,11 @@ export default function SettingsScreen({ navigation }: any) {
                             </View>
                         </View>
                     </View>
-                </View>
+                    <View style={styles.editHint}>
+                        <Ionicons name="create-outline" size={13} color={theme.textTertiary} />
+                        <Text style={[styles.editHintText, { color: theme.textTertiary }]}> Tap to edit profile</Text>
+                    </View>
+                </TouchableOpacity>
 
                 {/* ── App Settings ────────────────────────────── */}
                 <SectionHeader title="App Settings" />
@@ -145,7 +161,7 @@ export default function SettingsScreen({ navigation }: any) {
                 </View>
 
                 {/* ── Members ─────────────────────────────────── */}
-                <SectionHeader title="Members Across Books" />
+                <SectionHeader title="People You've Invited" />
                 <View style={[styles.card, { backgroundColor: theme.surface }]}>
                     {loadingMembers ? (
                         <View style={styles.membersLoader}>
@@ -156,19 +172,18 @@ export default function SettingsScreen({ navigation }: any) {
                         <View style={styles.emptyMembers}>
                             <Ionicons name="people-outline" size={32} color={theme.textTertiary} />
                             <Text style={[styles.emptyMembersText, { color: theme.textSecondary }]}>
-                                No members found. Invite people to your books.
+                                You haven't invited anyone yet. Go to a book and tap 👥 to invite members.
                             </Text>
                         </View>
                     ) : (
                         allMembers.map((m, idx) => (
                             <View
-                                key={`${m.user_id}-${m.book_id}`}
+                                key={m.user_id}
                                 style={[
                                     styles.memberRow,
                                     idx < allMembers.length - 1 && { borderBottomWidth: 1, borderBottomColor: theme.border },
                                 ]}
                             >
-                                {/* Avatar */}
                                 <LinearGradient
                                     colors={m.role === 'owner' ? ['#5B5FED', '#7C3AED'] : ['#9CA3AF', '#6B7280']}
                                     style={styles.memberAvatar}
@@ -181,21 +196,12 @@ export default function SettingsScreen({ navigation }: any) {
                                 <View style={styles.memberInfo}>
                                     <Text style={[styles.memberName, { color: theme.text }]} numberOfLines={1}>
                                         {getDisplayName(m.profile)}
-                                        {m.user_id === user?.id ? ' (You)' : ''}
                                     </Text>
                                     <Text style={[styles.memberEmail, { color: theme.textTertiary }]} numberOfLines={1}>
                                         {m.profile?.email}
                                     </Text>
-                                    {/* Book name pill */}
-                                    <View style={[styles.bookPill, { backgroundColor: m.bookColor + '18' }]}>
-                                        <View style={[styles.bookDot, { backgroundColor: m.bookColor }]} />
-                                        <Text style={[styles.bookPillText, { color: m.bookColor }]} numberOfLines={1}>
-                                            {m.bookName}
-                                        </Text>
-                                    </View>
                                 </View>
 
-                                {/* Role badge */}
                                 <View style={[
                                     styles.roleBadge,
                                     { backgroundColor: m.role === 'owner' ? COLORS.primaryLight : theme.surfaceSecondary }
@@ -221,7 +227,7 @@ export default function SettingsScreen({ navigation }: any) {
                         iconBg="#EEF2FF"
                         iconColor={COLORS.primary}
                         label="Privacy Policy"
-                        onPress={() => Linking.openURL('https://example.com/privacy')}
+                        onPress={() => navigation.navigate('PrivacyPolicy')}
                     />
                     <View style={[styles.rowDivider, { backgroundColor: theme.border }]} />
                     <SettingRow
@@ -229,7 +235,7 @@ export default function SettingsScreen({ navigation }: any) {
                         iconBg="#EEF2FF"
                         iconColor={COLORS.primary}
                         label="Terms & Conditions"
-                        onPress={() => Linking.openURL('https://example.com/terms')}
+                        onPress={() => navigation.navigate('Terms')}
                     />
                     <View style={[styles.rowDivider, { backgroundColor: theme.border }]} />
                     <SettingRow
@@ -350,17 +356,11 @@ const styles = StyleSheet.create({
     memberInfo: { flex: 1, gap: 2 },
     memberName: { fontSize: FONT_SIZE.md, fontWeight: '600' },
     memberEmail: { fontSize: FONT_SIZE.xs },
-    bookPill: {
-        flexDirection: 'row', alignItems: 'center', gap: 4,
-        alignSelf: 'flex-start',
-        paddingHorizontal: 8, paddingVertical: 2,
-        borderRadius: 20, marginTop: 2,
-    },
-    bookDot: { width: 6, height: 6, borderRadius: 3 },
-    bookPillText: { fontSize: FONT_SIZE.xs, fontWeight: '600' },
     roleBadge: {
         flexDirection: 'row', alignItems: 'center',
         paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20,
     },
     roleText: { fontSize: FONT_SIZE.xs, fontWeight: '700' },
+    editHint: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: SPACING.md, paddingBottom: SPACING.sm },
+    editHintText: { fontSize: FONT_SIZE.xs },
 })
