@@ -1,5 +1,5 @@
 // src/screens/AddEditEntryScreen.tsx
-import React, { useState } from 'react'
+import React, { useState, useRef, useCallback } from 'react'
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   KeyboardAvoidingView, Platform, ActivityIndicator, Alert,
@@ -19,8 +19,11 @@ import type { EntryType } from '../types'
 function formatPickerDate(date: Date): string {
   if (isToday(date)) return `Today, ${format(date, 'h:mm a')}`
   if (isYesterday(date)) return `Yesterday, ${format(date, 'h:mm a')}`
-  return format(date, 'MMM d, yyyy  h:mm a')
+  return format(date, 'MMM d, yyyy  ·  h:mm a')
 }
+
+// Android picker stage: which step of the date→time sequence we're on
+type AndroidPickerStage = 'idle' | 'date' | 'time'
 
 export default function AddEditEntryScreen({ route, navigation }: any) {
   const { bookId, entry, currency = 'USD' } = route.params
@@ -29,14 +32,23 @@ export default function AddEditEntryScreen({ route, navigation }: any) {
   const [amount, setAmount] = useState(isEditing ? String(entry.amount) : '')
   const [type, setType] = useState<EntryType>(isEditing ? entry.type : 'cash_in')
   const [note, setNote] = useState(isEditing ? (entry.note || '') : '')
-  const [entryDate, setEntryDate] = useState<Date>(isEditing ? new Date(entry.entry_date) : new Date())
+  const [entryDate, setEntryDate] = useState<Date>(
+    isEditing ? new Date(entry.entry_date) : new Date()
+  )
   const [loading, setLoading] = useState(false)
 
-  // Date picker state
-  const [showDatePicker, setShowDatePicker] = useState(false)
-  const [pickerMode, setPickerMode] = useState<'date' | 'time'>('date')
-  // On Android we show date then time sequentially; on iOS the spinner handles both
-  const [tempDate, setTempDate] = useState<Date>(entryDate)
+  // ── iOS modal picker ────────────────────────────────────────
+  const [iosPickerVisible, setIosPickerVisible] = useState(false)
+  const [iosPickerDate, setIosPickerDate] = useState<Date>(entryDate)
+
+  // ── Android: use a ref for the stage so setState doesn't cause
+  //    a re-render that unmounts the picker mid-selection ──────
+  const androidStageRef = useRef<AndroidPickerStage>('idle')
+  const androidTempDateRef = useRef<Date>(entryDate)
+  const [androidPickerVisible, setAndroidPickerVisible] = useState(false)
+  const [androidPickerMode, setAndroidPickerMode] = useState<'date' | 'time'>('date')
+  // We need ONE render trigger for the mode switch — use a counter
+  const [androidPickerKey, setAndroidPickerKey] = useState(0)
 
   const { createEntry, updateEntry } = useEntriesStore()
   const { mode } = useThemeStore()
@@ -60,48 +72,64 @@ export default function AddEditEntryScreen({ route, navigation }: any) {
     navigation.goBack()
   }
 
-  // ── Date picker logic ────────────────────────────────────
-  const openDatePicker = () => {
-    setTempDate(entryDate)
-    setPickerMode('date')
-    setShowDatePicker(true)
-  }
+  // ── Open picker ─────────────────────────────────────────────
+  const openPicker = useCallback(() => {
+    if (Platform.OS === 'ios') {
+      setIosPickerDate(entryDate)
+      setIosPickerVisible(true)
+    } else {
+      // Android: start with date stage
+      androidStageRef.current = 'date'
+      androidTempDateRef.current = new Date(entryDate)
+      setAndroidPickerMode('date')
+      setAndroidPickerKey(k => k + 1) // new key = fresh mount
+      setAndroidPickerVisible(true)
+    }
+  }, [entryDate])
 
-  const handleDateChange = (_: any, selected?: Date) => {
+  // ── Android picker onChange ──────────────────────────────────
+  const handleAndroidChange = useCallback((_: any, selected?: Date) => {
     if (!selected) {
-      // User cancelled on Android
-      setShowDatePicker(false)
+      // User pressed "Cancel" or dismissed
+      setAndroidPickerVisible(false)
+      androidStageRef.current = 'idle'
       return
     }
-    if (Platform.OS === 'android') {
-      if (pickerMode === 'date') {
-        // Merge selected date with existing time
-        const merged = new Date(selected)
-        merged.setHours(tempDate.getHours(), tempDate.getMinutes())
-        setTempDate(merged)
-        // Now show time picker
-        setPickerMode('time')
-      } else {
-        // Merge selected time with previously chosen date
-        const merged = new Date(tempDate)
-        merged.setHours(selected.getHours(), selected.getMinutes())
-        setEntryDate(merged)
-        setShowDatePicker(false)
-      }
-    } else {
-      // iOS — spinner updates continuously
-      setTempDate(selected)
+
+    if (androidStageRef.current === 'date') {
+      // Preserve existing time, set new date portion
+      const merged = new Date(androidTempDateRef.current)
+      merged.setFullYear(selected.getFullYear(), selected.getMonth(), selected.getDate())
+      androidTempDateRef.current = merged
+
+      // Move to time stage — update mode ref BEFORE triggering render
+      androidStageRef.current = 'time'
+      setAndroidPickerMode('time')
+      setAndroidPickerKey(k => k + 1) // remount picker with new mode
+      // Keep visible
+    } else if (androidStageRef.current === 'time') {
+      // Set time on the already-chosen date
+      const merged = new Date(androidTempDateRef.current)
+      merged.setHours(selected.getHours(), selected.getMinutes(), 0, 0)
+      setEntryDate(merged)
+      setAndroidPickerVisible(false)
+      androidStageRef.current = 'idle'
     }
-  }
+  }, [])
 
-  const handleIOSConfirm = () => {
-    setEntryDate(tempDate)
-    setShowDatePicker(false)
-  }
+  // ── iOS handlers ─────────────────────────────────────────────
+  const handleIosChange = useCallback((_: any, selected?: Date) => {
+    if (selected) setIosPickerDate(selected)
+  }, [])
 
-  const handleIOSCancel = () => {
-    setShowDatePicker(false)
-  }
+  const handleIosConfirm = useCallback(() => {
+    setEntryDate(iosPickerDate)
+    setIosPickerVisible(false)
+  }, [iosPickerDate])
+
+  const handleIosCancel = useCallback(() => {
+    setIosPickerVisible(false)
+  }, [])
 
   const currencySymbols: Record<string, string> = {
     USD: '$', EUR: '€', GBP: '£', INR: '₹', NPR: 'रू', AED: 'د.إ', SAR: '﷼', BDT: '৳',
@@ -110,13 +138,16 @@ export default function AddEditEntryScreen({ route, navigation }: any) {
 
   return (
     <SafeAreaView style={[s.container, { backgroundColor: theme.background }]} edges={['bottom']}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+      >
         <ScrollView
           contentContainerStyle={s.scroll}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* ── Type toggle ─────────────────────────────── */}
+          {/* Type toggle */}
           <View style={s.typeRow}>
             {(['cash_in', 'cash_out'] as EntryType[]).map(t => {
               const active = type === t
@@ -134,7 +165,11 @@ export default function AddEditEntryScreen({ route, navigation }: any) {
                   activeOpacity={0.8}
                 >
                   <View style={[s.typeBtnIcon, { backgroundColor: active ? col : theme.border }]}>
-                    <Ionicons name={t === 'cash_in' ? 'arrow-down' : 'arrow-up'} size={16} color={active ? '#fff' : theme.textTertiary} />
+                    <Ionicons
+                      name={t === 'cash_in' ? 'arrow-down' : 'arrow-up'}
+                      size={16}
+                      color={active ? '#fff' : theme.textTertiary}
+                    />
                   </View>
                   <Text style={[s.typeBtnLabel, { color: active ? col : theme.textSecondary }]}>
                     {t === 'cash_in' ? 'Cash In' : 'Cash Out'}
@@ -144,7 +179,7 @@ export default function AddEditEntryScreen({ route, navigation }: any) {
             })}
           </View>
 
-          {/* ── Amount ──────────────────────────────────── */}
+          {/* Amount */}
           <View style={[s.amountCard, { backgroundColor: theme.surface, borderColor: accentColor }]}>
             <Text style={[s.currencySymbol, { color: accentColor }]}>{symbol}</Text>
             <TextInput
@@ -163,11 +198,15 @@ export default function AddEditEntryScreen({ route, navigation }: any) {
             ) : null}
           </View>
 
-          {/* ── Note ────────────────────────────────────── */}
+          {/* Note */}
           <View style={s.field}>
             <Text style={[s.fieldLabel, { color: theme.textSecondary }]}>Note (optional)</Text>
             <TextInput
-              style={[s.noteInput, { backgroundColor: theme.surface, borderColor: theme.border, color: theme.text }]}
+              style={[s.noteInput, {
+                backgroundColor: theme.surface,
+                borderColor: theme.border,
+                color: theme.text,
+              }]}
               value={note}
               onChangeText={setNote}
               placeholder="What was this for?"
@@ -177,23 +216,25 @@ export default function AddEditEntryScreen({ route, navigation }: any) {
             />
           </View>
 
-          {/* ── Date & Time ─────────────────────────────── */}
+          {/* Date & Time */}
           <View style={s.field}>
             <Text style={[s.fieldLabel, { color: theme.textSecondary }]}>Date & Time</Text>
             <TouchableOpacity
               style={[s.dateRow, { backgroundColor: theme.surface, borderColor: theme.border }]}
-              onPress={openDatePicker}
+              onPress={openPicker}
               activeOpacity={0.8}
             >
               <View style={[s.dateIconWrap, { backgroundColor: COLORS.primaryLight }]}>
                 <Ionicons name="calendar" size={16} color={COLORS.primary} />
               </View>
-              <Text style={[s.dateText, { color: theme.text }]}>{formatPickerDate(entryDate)}</Text>
+              <Text style={[s.dateText, { color: theme.text }]}>
+                {formatPickerDate(entryDate)}
+              </Text>
               <Ionicons name="chevron-forward" size={16} color={theme.textTertiary} />
             </TouchableOpacity>
           </View>
 
-          {/* ── Save button ──────────────────────────────── */}
+          {/* Save */}
           <TouchableOpacity
             style={[s.saveBtn, { opacity: loading ? 0.7 : 1 }]}
             onPress={handleSave}
@@ -224,41 +265,42 @@ export default function AddEditEntryScreen({ route, navigation }: any) {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* ── Date Picker ─────────────────────────────────── */}
-      {Platform.OS === 'android' && showDatePicker && (
+      {/* Android native picker — key prop forces fresh mount on mode change */}
+      {Platform.OS === 'android' && androidPickerVisible && (
         <DateTimePicker
-          value={tempDate}
-          mode={pickerMode}
+          key={`android-picker-${androidPickerKey}`}
+          value={androidTempDateRef.current}
+          mode={androidPickerMode}
           display="default"
-          onChange={handleDateChange}
-          maximumDate={new Date()}
+          onChange={handleAndroidChange}
+          maximumDate={androidPickerMode === 'date' ? new Date() : undefined}
         />
       )}
 
-      {/* iOS: modal spinner */}
+      {/* iOS modal bottom-sheet picker */}
       {Platform.OS === 'ios' && (
         <Modal
-          visible={showDatePicker}
+          visible={iosPickerVisible}
           transparent
           animationType="slide"
-          onRequestClose={handleIOSCancel}
+          onRequestClose={handleIosCancel}
         >
-          <Pressable style={s.modalBackdrop} onPress={handleIOSCancel} />
-          <View style={[s.modalSheet, { backgroundColor: theme.surface }]}>
-            <View style={[s.modalHeader, { borderBottomColor: theme.border }]}>
-              <TouchableOpacity onPress={handleIOSCancel}>
-                <Text style={[s.modalCancel, { color: theme.textSecondary }]}>Cancel</Text>
+          <Pressable style={s.backdrop} onPress={handleIosCancel} />
+          <View style={[s.sheet, { backgroundColor: theme.surface }]}>
+            <View style={[s.sheetHeader, { borderBottomColor: theme.border }]}>
+              <TouchableOpacity onPress={handleIosCancel}>
+                <Text style={[s.sheetCancel, { color: theme.textSecondary }]}>Cancel</Text>
               </TouchableOpacity>
-              <Text style={[s.modalTitle, { color: theme.text }]}>Select Date & Time</Text>
-              <TouchableOpacity onPress={handleIOSConfirm}>
-                <Text style={s.modalDone}>Done</Text>
+              <Text style={[s.sheetTitle, { color: theme.text }]}>Date & Time</Text>
+              <TouchableOpacity onPress={handleIosConfirm}>
+                <Text style={s.sheetDone}>Done</Text>
               </TouchableOpacity>
             </View>
             <DateTimePicker
-              value={tempDate}
+              value={iosPickerDate}
               mode="datetime"
               display="spinner"
-              onChange={handleDateChange}
+              onChange={handleIosChange}
               maximumDate={new Date()}
               textColor={theme.text}
               style={{ height: 200 }}
@@ -284,51 +326,34 @@ const s = StyleSheet.create({
   typeBtnLabel: { fontSize: FONT_SIZE.md, fontWeight: '700' },
 
   amountCard: {
-    flexDirection: 'row', alignItems: 'center',
-    borderRadius: BORDER_RADIUS.xl, borderWidth: 2,
-    paddingHorizontal: SPACING.lg, marginBottom: SPACING.xl, ...SHADOW.sm,
+    flexDirection: 'row', alignItems: 'center', borderRadius: BORDER_RADIUS.xl,
+    borderWidth: 2, paddingHorizontal: SPACING.lg, marginBottom: SPACING.xl, ...SHADOW.sm,
   },
   currencySymbol: { fontSize: FONT_SIZE['2xl'], fontWeight: '700', marginRight: SPACING.sm },
   amountInput: { flex: 1, fontSize: 42, fontWeight: '900', paddingVertical: SPACING.lg, letterSpacing: -1 },
   clearBtn: { padding: 4 },
 
   field: { marginBottom: SPACING.lg },
-  fieldLabel: {
-    fontSize: FONT_SIZE.xs, fontWeight: '700',
-    marginBottom: SPACING.sm, textTransform: 'uppercase', letterSpacing: 0.8,
-  },
-  noteInput: {
-    borderRadius: BORDER_RADIUS.md, borderWidth: 1.5,
-    padding: SPACING.md, fontSize: FONT_SIZE.md,
-    minHeight: 80, textAlignVertical: 'top',
-  },
+  fieldLabel: { fontSize: FONT_SIZE.xs, fontWeight: '700', marginBottom: SPACING.sm, textTransform: 'uppercase', letterSpacing: 0.8 },
+  noteInput: { borderRadius: BORDER_RADIUS.md, borderWidth: 1.5, padding: SPACING.md, fontSize: FONT_SIZE.md, minHeight: 80, textAlignVertical: 'top' },
 
-  dateRow: {
-    flexDirection: 'row', alignItems: 'center', gap: SPACING.sm,
-    borderRadius: BORDER_RADIUS.md, borderWidth: 1.5, padding: SPACING.md,
-  },
+  dateRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, borderRadius: BORDER_RADIUS.md, borderWidth: 1.5, padding: SPACING.md },
   dateIconWrap: { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   dateText: { flex: 1, fontSize: FONT_SIZE.md, fontWeight: '500' },
 
   saveBtn: { borderRadius: BORDER_RADIUS.lg, overflow: 'hidden', marginTop: SPACING.sm, ...SHADOW.md },
   saveBtnGrad: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, gap: SPACING.sm },
   saveBtnText: { fontSize: FONT_SIZE.md, fontWeight: '700', color: '#fff' },
-
   cancelBtn: { paddingVertical: SPACING.md, alignItems: 'center' },
   cancelText: { fontSize: FONT_SIZE.md, fontWeight: '600' },
 
-  // iOS date picker modal
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
-  modalSheet: {
-    borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    paddingBottom: 32, ...SHADOW.lg,
-  },
-  modalHeader: {
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' },
+  sheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 32, ...SHADOW.lg },
+  sheetHeader: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: SPACING.lg, paddingVertical: SPACING.md,
-    borderBottomWidth: 1,
+    paddingHorizontal: SPACING.lg, paddingVertical: SPACING.md, borderBottomWidth: 1,
   },
-  modalTitle: { fontSize: FONT_SIZE.md, fontWeight: '700' },
-  modalCancel: { fontSize: FONT_SIZE.md },
-  modalDone: { fontSize: FONT_SIZE.md, fontWeight: '700', color: COLORS.primary },
+  sheetTitle: { fontSize: FONT_SIZE.md, fontWeight: '700' },
+  sheetCancel: { fontSize: FONT_SIZE.md },
+  sheetDone: { fontSize: FONT_SIZE.md, fontWeight: '700', color: COLORS.primary },
 })

@@ -153,7 +153,12 @@ export default function MembersScreen({ route }: any) {
             <View style={[
               s.inviteInputWrap,
               { backgroundColor: theme.background, borderColor: theme.border },
-              emailFocused && { borderColor: COLORS.primary, backgroundColor: COLORS.primaryLight },
+              emailFocused && {
+                borderColor: COLORS.primary,
+                backgroundColor: mode === 'dark'
+                  ? theme.surfaceSecondary   // darker surface for dark mode
+                  : COLORS.primaryLight      // keep light for light mode
+              },
             ]}>
               <Ionicons
                 name="mail-outline"

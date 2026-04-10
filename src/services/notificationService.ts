@@ -1,20 +1,21 @@
 // src/services/notificationService.ts
-// CRITICAL FIX: Notifications.setNotificationHandler() is called at module
-// import time (top level). If expo-notifications is not fully initialized
-// when the JS bundle first runs (happens on some Android versions), this
-// throws and crashes the entire module — which crashes App.tsx import chain
-// → blank/frozen splash.
+// FIREBASE FIX: expo-notifications on Android uses FCM (Firebase Cloud Messaging)
+// for REMOTE push tokens. If google-services.json is not configured, calling
+// getExpoPushTokenAsync() throws "FirebaseApp is not initialized".
 //
-// Fix: wrap setNotificationHandler in try/catch and defer to useEffect.
-// Also: getExpoPushTokenAsync() with an undefined projectId throws on device
-// builds — added guard.
+// Solution: Use LOCAL notifications only (no Firebase required).
+// Local notifications work on any device without any Firebase setup.
+// They fire immediately and show a system notification — perfect for
+// "you received an invitation" alerts triggered by our Supabase realtime hook.
+//
+// Remote push (server → device when app is closed) is a Phase 2 feature
+// that requires adding google-services.json to the build.
 
 import * as Notifications from 'expo-notifications'
 import * as Device from 'expo-device'
 import { Platform } from 'react-native'
-import supabase from './supabase'
 
-// Safe top-level call — won't crash if notifications module isn't ready
+// Safe top-level handler setup
 try {
     Notifications.setNotificationHandler({
         handleNotification: async () => ({
@@ -24,73 +25,60 @@ try {
         }),
     })
 } catch (e) {
-    console.warn('[Notifications] setNotificationHandler failed:', e)
+    console.warn('[Notifications] handler setup failed:', e)
 }
 
 export const notificationService = {
-    async registerForPushNotifications(): Promise<string | null> {
+    /**
+     * Request notification permission and set up Android channel.
+     * Does NOT call getExpoPushTokenAsync — avoids Firebase requirement.
+     * Returns true if permission granted.
+     */
+    async setup(): Promise<boolean> {
         try {
             if (!Device.isDevice) {
-                console.log('[Push] Not a physical device — skipping')
-                return null
+                console.log('[Push] Emulator — notifications limited')
+                return false
             }
 
-            const { status: existingStatus } = await Notifications.getPermissionsAsync()
-            let finalStatus = existingStatus
-
-            if (existingStatus !== 'granted') {
-                const { status } = await Notifications.requestPermissionsAsync()
-                finalStatus = status
-            }
-
-            if (finalStatus !== 'granted') {
-                console.log('[Push] Permission not granted')
-                return null
-            }
-
+            // Android: create notification channel first
             if (Platform.OS === 'android') {
                 await Notifications.setNotificationChannelAsync('invitations', {
                     name: 'Invitations',
                     importance: Notifications.AndroidImportance.MAX,
                     vibrationPattern: [0, 250, 250, 250],
                     lightColor: '#5B5FED',
+                    sound: 'default',
                 })
             }
 
-            // projectId is REQUIRED for getExpoPushTokenAsync on device builds
-            const projectId = process.env.EXPO_PUBLIC_EAS_PROJECT_ID
-            if (!projectId) {
-                console.warn('[Push] EXPO_PUBLIC_EAS_PROJECT_ID not set — skipping token fetch')
-                return null
-            }
+            const { status: existing } = await Notifications.getPermissionsAsync()
+            if (existing === 'granted') return true
 
-            const tokenData = await Notifications.getExpoPushTokenAsync({ projectId })
-            const token = tokenData.data
-
-            // Save token to profile
-            const { data: { user } } = await supabase.auth.getUser()
-            if (user && token) {
-                await supabase.from('profiles').update({ push_token: token }).eq('id', user.id)
-            }
-
-            return token
+            const { status } = await Notifications.requestPermissionsAsync()
+            return status === 'granted'
         } catch (e) {
-            // Never crash the app over push registration failure
-            console.warn('[Push] registerForPushNotifications error:', e)
-            return null
+            console.warn('[Push] setup error:', e)
+            return false
         }
     },
 
-    async sendLocalInvitationNotification(inviterName: string, bookName: string) {
+    /**
+     * Show a local notification immediately.
+     * Works without Firebase / google-services.json.
+     */
+    async sendLocalInvitationNotification(inviterName: string, bookName: string): Promise<void> {
         try {
             await Notifications.scheduleNotificationAsync({
                 content: {
                     title: '📬 New Invitation',
                     body: `${inviterName} invited you to "${bookName}"`,
                     data: { type: 'invitation' },
-                    sound: true,
+                    sound: 'default',
+                    // Android-specific channel
+                    ...(Platform.OS === 'android' && { channelId: 'invitations' }),
                 },
-                trigger: null,
+                trigger: null, // fire immediately
             })
         } catch (e) {
             console.warn('[Push] sendLocalNotification error:', e)
@@ -115,7 +103,7 @@ export const notificationService = {
         }
     },
 
-    async clearBadge() {
+    async clearBadge(): Promise<void> {
         try {
             await Notifications.setBadgeCountAsync(0)
             await Notifications.dismissAllNotificationsAsync()
