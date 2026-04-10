@@ -8,6 +8,12 @@ node_modules/
 dist/
 web-build/
 
+# build
+build/
+android/
+ios/
+
+
 # VSCode
 .vscode/
 
