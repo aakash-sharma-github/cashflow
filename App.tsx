@@ -7,6 +7,7 @@ import * as SplashScreen from 'expo-splash-screen'
 import RootNavigator from './src/navigation'
 import { useAuthStore } from './src/store/authStore'
 import { useThemeStore } from './src/store/themeStore'
+import { useTodoStore } from './src/store/todoStore'
 import { useOfflineSync } from './src/hooks/useOfflineSync'
 import { usePushNotifications } from './src/hooks/usePushNotifications'
 
@@ -20,6 +21,7 @@ function AppContent() {
   const initialize = useAuthStore(s => s.initialize)
   const isLoading = useAuthStore(s => s.isLoading)
   const loadTheme = useThemeStore(s => s.load)
+  const loadTodos = useTodoStore(s => s.load)
   const mode = useThemeStore(s => s.mode)
 
   useOfflineSync()
@@ -32,6 +34,7 @@ function AppContent() {
         await Promise.all([
           initialize(),
           loadTheme(),
+          loadTodos(),
         ])
       } catch (e) {
         console.warn('[App] boot error:', e)

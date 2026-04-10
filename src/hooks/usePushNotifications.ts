@@ -18,7 +18,16 @@ export function usePushNotifications() {
     // Register device on login
     useEffect(() => {
         if (!isAuthenticated || !user) return
-        notificationService.registerForPushNotifications().catch(console.error)
+
+        const initPush = async () => {
+            try {
+                await notificationService.setup()
+            } catch (e) {
+                console.warn('Push setup failed:', e)
+            }
+        }
+
+        initPush()
     }, [isAuthenticated, user?.id])
 
     // Load initial unread count
