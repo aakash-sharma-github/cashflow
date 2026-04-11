@@ -4,7 +4,7 @@ import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Scr
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
 import { Ionicons } from '@expo/vector-icons'
-import { exportEntriesAsCSV, exportEntriesAsPDF, pickAndParseCSV, ImportResult } from '../services/exportService'
+import { exportEntriesAsCSV, exportEntriesAsPDF, exportEntriesAsExcel, pickAndParseCSV, ImportResult } from '../services/exportService'
 import { entriesService } from '../services/entriesService'
 import { useEntriesStore } from '../store/entriesStore'
 import { useBooksStore } from '../store/booksStore'
@@ -21,6 +21,7 @@ export default function ExportImportScreen({ route }: any) {
 
   const [csvLoading, setCsvLoading] = useState(false)
   const [pdfLoading, setPdfLoading] = useState(false)
+  const [xlsxLoading, setXlsxLoading] = useState(false)
   const [importLoading, setImportLoading] = useState(false)
   const [importPreview, setImportPreview] = useState<ImportResult | null>(null)
   const [importing, setImporting] = useState(false)
@@ -43,6 +44,15 @@ export default function ExportImportScreen({ route }: any) {
       await exportEntriesAsPDF(data || entries, currentBook)
     } catch (e: any) { Alert.alert('Export Failed', e.message) }
     finally { setPdfLoading(false) }
+  }
+
+  const handleExportExcel = async () => {
+    setXlsxLoading(true)
+    try {
+      const { data } = await entriesService.getEntries(bookId, 'all', 0)
+      await exportEntriesAsExcel(data || entries, currentBook)
+    } catch (e: any) { Alert.alert('Export Failed', e.message) }
+    finally { setXlsxLoading(false) }
   }
 
   const handlePickCSV = async () => {
@@ -134,6 +144,11 @@ export default function ExportImportScreen({ route }: any) {
           icon="document-text-outline" iconBg={COLORS.cashOutLight} iconColor={COLORS.cashOut}
           title="Export as PDF" desc="Formatted report with summary table"
           onPress={handleExportPDF} loading={pdfLoading}
+        />
+        <ActionCard
+          icon="grid-outline" iconBg="#E8FFF3" iconColor="#059669"
+          title="Export as Excel (.xlsx)" desc="Native Excel file — open in Microsoft Excel or Google Sheets"
+          onPress={handleExportExcel} loading={xlsxLoading}
         />
 
         <View style={[s.divider, { backgroundColor: theme.border }]} />

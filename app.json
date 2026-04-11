@@ -2,7 +2,7 @@
   "expo": {
     "name": "CashFlow",
     "slug": "cashflow",
-    "version": "1.1.0",
+    "version": "2.2.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -56,6 +56,15 @@
     },
     "scheme": "cashflow",
     "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash.png",
+          "imageWidth": 280,
+          "resizeMode": "contain",
+          "backgroundColor": "#5B5FED"
+        }
+      ],
       "expo-secure-store",
       [
         "expo-notifications",

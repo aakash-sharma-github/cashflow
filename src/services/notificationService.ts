@@ -37,7 +37,7 @@ export const notificationService = {
     async setup(): Promise<boolean> {
         try {
             if (!Device.isDevice) {
-                console.log('[Push] Emulator — notifications limited')
+                // console.log('[Push] Emulator — notifications limited')
                 return false
             }
 

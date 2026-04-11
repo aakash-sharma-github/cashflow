@@ -318,3 +318,78 @@ function parseCSVRow(line: string): string[] {
   result.push(current)
   return result
 }
+
+// ─── Excel Export ─────────────────────────────────────────────
+
+export async function exportEntriesAsExcel(
+  entries: Entry[],
+  book: Book
+): Promise<void> {
+  // We build a minimal XLSX file manually using the XLSX library.
+  // The xlsx package works in React Native via its CommonJS bundle.
+  // We write it as a base64 string then save with FileSystem.
+
+  // Dynamic import to avoid issues if package missing
+  let XLSX: any
+  try {
+    XLSX = require('xlsx')
+  } catch {
+    throw new Error('xlsx package not installed. Run: npm install xlsx')
+  }
+
+  // Build worksheet data
+  const wsData: any[][] = [
+    // Header row
+    ['Date', 'Type', 'Amount', 'Currency', 'Note', 'Added By'],
+    // Data rows
+    ...entries.map(e => [
+      format(new Date(e.entry_date), 'yyyy-MM-dd HH:mm'),
+      e.type === 'cash_in' ? 'Cash In' : 'Cash Out',
+      Number(e.amount.toFixed(2)),
+      book.currency,
+      e.note || '',
+      e.profile?.full_name || e.profile?.email || '',
+    ]),
+    // Empty row, then summary
+    [],
+    ['Summary', '', '', '', '', ''],
+    ['Total Cash In', '', entries.filter(e => e.type === 'cash_in').reduce((s, e) => s + Number(e.amount), 0), book.currency, '', ''],
+    ['Total Cash Out', '', entries.filter(e => e.type === 'cash_out').reduce((s, e) => s + Number(e.amount), 0), book.currency, '', ''],
+    ['Net Balance', '', entries.reduce((s, e) => s + (e.type === 'cash_in' ? 1 : -1) * Number(e.amount), 0), book.currency, '', ''],
+    ['Exported', '', format(new Date(), 'yyyy-MM-dd HH:mm'), '', '', ''],
+  ]
+
+  const ws = XLSX.utils.aoa_to_sheet(wsData)
+
+  // Style header row (column widths)
+  ws['!cols'] = [
+    { wch: 18 }, // Date
+    { wch: 12 }, // Type
+    { wch: 12 }, // Amount
+    { wch: 8 }, // Currency
+    { wch: 30 }, // Note
+    { wch: 24 }, // Added By
+  ]
+
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, book.name.slice(0, 31)) // sheet name max 31 chars
+
+  // Write to base64
+  const base64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' })
+
+  const filename = `cashflow_${book.name.replace(/\s+/g, '_')}_${format(new Date(), 'yyyyMMdd')}.xlsx`
+  const fileUri = FileSystem.cacheDirectory + filename
+
+  await FileSystem.writeAsStringAsync(fileUri, base64, {
+    encoding: FileSystem.EncodingType.Base64,
+  })
+
+  const canShare = await Sharing.isAvailableAsync()
+  if (!canShare) throw new Error('Sharing is not available on this device')
+
+  await Sharing.shareAsync(fileUri, {
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    dialogTitle: `Export ${book.name} as Excel`,
+    UTI: 'com.microsoft.excel.xlsx',
+  })
+}
