@@ -243,14 +243,17 @@ export default function SettingsScreen({ navigation }: any) {
                         iconBg="#EEF2FF"
                         iconColor={COLORS.primary}
                         label="About Us"
-                        sublabel="CashFlow v1.1.0"
+                        sublabel="CashFlow v2.2.2"
                         onPress={() => Alert.alert(
                             'CashFlow',
-                            'Version 1.1.0\n\nA smart, collaborative expense tracker built for teams and individuals.\n\n© 2024 CashFlow. All rights reserved.',
+                            'Version 2.2.2\n\nA smart, collaborative expense tracker built for teams and individuals.\n\n© 2026 CashFlow. All rights reserved.',
                             [{ text: 'OK' }]
                         )}
                     />
                 </View>
+                <Text style={{ fontSize: FONT_SIZE.xs, color: theme.textTertiary, marginTop: SPACING.sm, marginLeft: 4 }}>
+                    Made with ❤️ by Aakash sharma.
+                </Text>
 
                 {/* ── Sign Out ────────────────────────────────── */}
                 <SectionHeader title="Account" />

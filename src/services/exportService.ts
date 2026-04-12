@@ -393,3 +393,127 @@ export async function exportEntriesAsExcel(
     UTI: 'com.microsoft.excel.xlsx',
   })
 }
+
+// ─── Excel / XLSM Import ──────────────────────────────────────
+
+/**
+ * Let user pick an .xlsx or .xlsm file and parse it into entry rows.
+ * XLSM is a macro-enabled Excel workbook — same binary format, just different
+ * extension. The xlsx library handles both identically.
+ *
+ * Expected columns (case-insensitive): Date, Type, Amount, Note
+ */
+export async function pickAndParseExcel(): Promise<ImportResult | null> {
+  let XLSX: any
+  try {
+    XLSX = require('xlsx')
+  } catch {
+    throw new Error('xlsx package not installed. Run: npm install xlsx')
+  }
+
+  const result = await DocumentPicker.getDocumentAsync({
+    type: [
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // xlsx
+      'application/vnd.ms-excel.sheet.macroEnabled.12',                    // xlsm
+      'application/vnd.ms-excel',                                           // xls fallback
+      '*/*',                                                                 // Android fallback
+    ],
+    copyToCacheDirectory: true,
+  })
+
+  if (result.canceled || !result.assets?.[0]) return null
+
+  const fileUri = result.assets[0].uri
+
+  // Read as base64 then parse with xlsx
+  const base64 = await FileSystem.readAsStringAsync(fileUri, {
+    encoding: FileSystem.EncodingType.Base64,
+  })
+
+  const wb = XLSX.read(base64, { type: 'base64' })
+
+  // Use first sheet
+  const sheetName = wb.SheetNames[0]
+  if (!sheetName) {
+    return { rows: [], skipped: 0, errors: ['Excel file has no sheets'] }
+  }
+
+  const ws = wb.Sheets[sheetName]
+
+  // Convert to array of arrays
+  const raw: any[][] = XLSX.utils.sheet_to_json(ws, {
+    header: 1,
+    defval: '',
+    blankrows: false,
+  })
+
+  if (raw.length < 2) {
+    return { rows: [], skipped: 0, errors: ['Sheet appears to be empty or has no data rows'] }
+  }
+
+  // Find header row (first non-empty row)
+  const headers: string[] = raw[0].map((h: any) => String(h || '').toLowerCase().trim())
+
+  const colIndex = {
+    date: headers.findIndex(h => h.includes('date')),
+    type: headers.findIndex(h => h.includes('type')),
+    amount: headers.findIndex(h => h.includes('amount')),
+    note: headers.findIndex(h => h.includes('note') || h.includes('description') || h.includes('memo')),
+  }
+
+  if (colIndex.type === -1 || colIndex.amount === -1) {
+    return { rows: [], skipped: 0, errors: ['Excel sheet must have "Type" and "Amount" columns in the header row'] }
+  }
+
+  const rows: ParsedEntryRow[] = []
+  const errors: string[] = []
+  let skipped = 0
+
+  for (let i = 1; i < raw.length; i++) {
+    const row = raw[i]
+    if (!row || row.every((c: any) => c === '' || c === null || c === undefined)) {
+      skipped++
+      continue
+    }
+
+    const rawType = String(row[colIndex.type] || '').toLowerCase().trim()
+    const rawAmount = String(row[colIndex.amount] || '').replace(/[^0-9.]/g, '')
+    const rawDate = colIndex.date >= 0 ? row[colIndex.date] : ''
+    const rawNote = colIndex.note >= 0 ? String(row[colIndex.note] || '').trim() : ''
+
+    // Validate type
+    let type: 'cash_in' | 'cash_out' | null = null
+    if (['cash in', 'cashin', 'cash_in', 'in', 'income', 'credit', '+'].includes(rawType)) type = 'cash_in'
+    else if (['cash out', 'cashout', 'cash_out', 'out', 'expense', 'debit', '-'].includes(rawType)) type = 'cash_out'
+
+    if (!type) { errors.push(`Row ${i + 1}: Unknown type "${row[colIndex.type]}" — skipped`); skipped++; continue }
+
+    // Validate amount — xlsx may return a number directly
+    const amount = typeof row[colIndex.amount] === 'number'
+      ? row[colIndex.amount]
+      : parseFloat(rawAmount)
+
+    if (isNaN(amount) || amount <= 0) {
+      errors.push(`Row ${i + 1}: Invalid amount "${row[colIndex.amount]}" — skipped`); skipped++; continue
+    }
+
+    // Parse date — xlsx returns JS Date objects for date cells, or a number (serial)
+    let entry_date = new Date().toISOString()
+    if (rawDate) {
+      if (rawDate instanceof Date && !isNaN(rawDate.getTime())) {
+        entry_date = rawDate.toISOString()
+      } else if (typeof rawDate === 'number') {
+        // Excel serial date
+        const d = XLSX.SSF.parse_date_code(rawDate)
+        if (d) entry_date = new Date(d.y, d.m - 1, d.d).toISOString()
+      } else {
+        const parsed = new Date(String(rawDate))
+        if (!isNaN(parsed.getTime())) entry_date = parsed.toISOString()
+      }
+    }
+
+    rows.push({ amount, type, note: rawNote || null, entry_date })
+  }
+
+  return { rows, skipped, errors }
+}

@@ -2,7 +2,7 @@
 import React, { useCallback, useState } from 'react'
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  ActivityIndicator, RefreshControl, Alert, Pressable,
+  ActivityIndicator, RefreshControl, Pressable,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -13,6 +13,7 @@ import { useAuthStore } from '../store/authStore'
 import { useOfflineStore } from '../store/offlineStore'
 import { useThemeStore, getTheme } from '../store/themeStore'
 import { COLORS, SPACING, BORDER_RADIUS, FONT_SIZE, SHADOW } from '../constants'
+import { themedAlert, themedActionSheet } from '../components/common/ThemedAlert'
 import { formatAmount, getInitials } from '../utils'
 import type { Book } from '../types'
 
@@ -33,27 +34,47 @@ export default function HomeScreen({ navigation }: any) {
   }
 
   const handleLongPress = (book: Book) => {
-    const options: any[] = [{ text: 'Cancel', style: 'cancel' }]
-    if (book.role === 'owner') {
-      options.push({ text: 'Edit', onPress: () => navigation.navigate('CreateBook', { book }) })
-      options.push({
-        text: 'Delete', style: 'destructive',
-        onPress: () => Alert.alert(
-          `Delete "${book.name}"?`,
-          'All entries will be permanently deleted.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Delete', style: 'destructive', onPress: async () => {
-                const { error } = await deleteBook(book.id)
-                if (error) Alert.alert('Error', error)
-              }
-            },
-          ]
-        ),
-      })
+    // NOTE: role can be 'owner', 'member', or undefined (from local cache).
+    // Treat undefined as owner if owner_id matches — gives best UX.
+    const { user } = useAuthStore.getState()
+    const isOwner = book.role === 'owner' || book.owner_id === user?.id
+
+    if (!isOwner) {
+      // Members get no actions on long press
+      return
     }
-    Alert.alert(book.name, 'Choose an action', options)
+
+    themedActionSheet(
+      book.name,
+      undefined,
+      [
+        {
+          text: 'Edit Book',
+          onPress: () => navigation.navigate('CreateBook', { book }),
+        },
+        {
+          text: 'Delete Book',
+          style: 'destructive' as const,
+          onPress: () => themedAlert(
+            `Delete "${book.name}"?`,
+            'All entries and member access will be permanently removed. This cannot be undone.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Delete',
+                style: 'destructive',
+                onPress: async () => {
+                  const { error } = await deleteBook(book.id)
+                  if (error) themedAlert('Delete Failed', error)
+                },
+              },
+            ],
+            'trash-outline',
+          ),
+        },
+        { text: 'Cancel', style: 'cancel' as const },
+      ],
+    )
   }
 
   const totalBalance = books.reduce((s, b) => s + (b.balance || 0), 0)
@@ -67,10 +88,52 @@ export default function HomeScreen({ navigation }: any) {
             Good {getGreeting()},
           </Text>
           <Text style={[styles.userName, { color: theme.text }]} numberOfLines={1}>
-            {user?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'there'}
+            {user?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'there'} 👋
           </Text>
         </View>
-      </View>     
+        {/* Avatar — tapping navigates to Settings tab */}
+        {/* <TouchableOpacity
+          style={styles.avatarBtn}
+          onPress={() => navigation.navigate('Settings')}
+          activeOpacity={0.85}
+        >
+          <LinearGradient colors={['#5B5FED', '#7C3AED']} style={styles.avatarGrad}>
+            <Text style={styles.avatarInitial}>
+              {getInitials(user?.full_name || user?.email || '?')}
+            </Text>
+          </LinearGradient>
+        </TouchableOpacity> */}
+      </View>
+
+      {/* Net balance card */}
+      {/* <LinearGradient
+        colors={['#5B5FED', '#7C3AED']}
+        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+        style={styles.balanceCard}
+      >
+        <View style={styles.balanceCardDeco1} />
+        <View style={styles.balanceCardDeco2} />
+        <Text style={styles.balanceLabel}>Total Net Balance</Text>
+        <Text style={styles.balanceAmount}>
+          {totalBalance >= 0 ? '+' : ''}{formatAmount(Math.abs(totalBalance))}
+        </Text>
+        <View style={styles.balanceMeta}>
+          <View style={styles.balanceMetaItem}>
+            <Ionicons name="albums-outline" size={14} color="rgba(255,255,255,0.7)" />
+            <Text style={styles.balanceMetaText}>
+              {books.length} book{books.length !== 1 ? 's' : ''}
+            </Text>
+          </View>
+          {!isOnline && (
+            <View style={styles.offlinePill}>
+              <Ionicons name="cloud-offline-outline" size={13} color="rgba(255,255,255,0.9)" />
+              <Text style={styles.offlinePillText}>
+                {pendingQueue.length > 0 ? `${pendingQueue.length} pending` : 'Offline'}
+              </Text>
+            </View>
+          )}
+        </View>
+      </LinearGradient> */}
 
       {/* Section header */}
       <View style={styles.sectionRow}>

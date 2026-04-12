@@ -1,14 +1,15 @@
 // src/screens/ExportImportScreen.tsx
 import React, { useState } from 'react'
-import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, ScrollView } from 'react-native'
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
 import { Ionicons } from '@expo/vector-icons'
-import { exportEntriesAsCSV, exportEntriesAsPDF, exportEntriesAsExcel, pickAndParseCSV, ImportResult } from '../services/exportService'
+import { exportEntriesAsCSV, exportEntriesAsPDF, exportEntriesAsExcel, pickAndParseCSV, pickAndParseExcel, ImportResult } from '../services/exportService'
 import { entriesService } from '../services/entriesService'
 import { useEntriesStore } from '../store/entriesStore'
 import { useBooksStore } from '../store/booksStore'
 import { useThemeStore, getTheme } from '../store/themeStore'
+import { themedAlert, themedActionSheet } from '../components/common/ThemedAlert'
 import { COLORS, SPACING, BORDER_RADIUS, FONT_SIZE, SHADOW } from '../constants'
 import { formatAmount } from '../utils'
 
@@ -23,6 +24,7 @@ export default function ExportImportScreen({ route }: any) {
   const [pdfLoading, setPdfLoading] = useState(false)
   const [xlsxLoading, setXlsxLoading] = useState(false)
   const [importLoading, setImportLoading] = useState(false)
+  const [xlsxImportLoading, setXlsxImportLoading] = useState(false)
   const [importPreview, setImportPreview] = useState<ImportResult | null>(null)
   const [importing, setImporting] = useState(false)
 
@@ -33,7 +35,7 @@ export default function ExportImportScreen({ route }: any) {
     try {
       const { data } = await entriesService.getEntries(bookId, 'all', 0)
       await exportEntriesAsCSV(data || entries, currentBook)
-    } catch (e: any) { Alert.alert('Export Failed', e.message) }
+    } catch (e: any) { themedAlert('Export Failed', e.message) }
     finally { setCsvLoading(false) }
   }
 
@@ -42,7 +44,7 @@ export default function ExportImportScreen({ route }: any) {
     try {
       const { data } = await entriesService.getEntries(bookId, 'all', 0)
       await exportEntriesAsPDF(data || entries, currentBook)
-    } catch (e: any) { Alert.alert('Export Failed', e.message) }
+    } catch (e: any) { themedAlert('Export Failed', e.message) }
     finally { setPdfLoading(false) }
   }
 
@@ -51,7 +53,7 @@ export default function ExportImportScreen({ route }: any) {
     try {
       const { data } = await entriesService.getEntries(bookId, 'all', 0)
       await exportEntriesAsExcel(data || entries, currentBook)
-    } catch (e: any) { Alert.alert('Export Failed', e.message) }
+    } catch (e: any) { themedAlert('Export Failed', e.message) }
     finally { setXlsxLoading(false) }
   }
 
@@ -60,13 +62,22 @@ export default function ExportImportScreen({ route }: any) {
     try {
       const result = await pickAndParseCSV()
       if (result) setImportPreview(result)
-    } catch (e: any) { Alert.alert('Could not read file', e.message) }
+    } catch (e: any) { themedAlert('Could not read file', e.message) }
     finally { setImportLoading(false) }
+  }
+
+  const handlePickExcel = async () => {
+    setXlsxImportLoading(true)
+    try {
+      const result = await pickAndParseExcel()
+      if (result) setImportPreview(result)
+    } catch (e: any) { themedAlert('Could not read file', e.message) }
+    finally { setXlsxImportLoading(false) }
   }
 
   const handleConfirmImport = async () => {
     if (!importPreview?.rows.length) return
-    Alert.alert(
+    themedAlert(
       `Import ${importPreview.rows.length} entries?`,
       `Add to "${currentBook.name}". This cannot be undone.`,
       [
@@ -85,7 +96,7 @@ export default function ExportImportScreen({ route }: any) {
             setImporting(false)
             setImportPreview(null)
             useEntriesStore.getState().fetchEntries(bookId)
-            Alert.alert('Done ✅', `${ok} imported${fail > 0 ? `, ${fail} failed` : ''}.`)
+            themedAlert('Done ✅', `${ok} imported${fail > 0 ? `, ${fail} failed` : ''}.`)
           }
         },
       ]
@@ -178,8 +189,13 @@ export default function ExportImportScreen({ route }: any) {
 
         <ActionCard
           icon="folder-open-outline" iconBg={COLORS.primaryLight} iconColor={COLORS.primary}
-          title="Choose CSV File" desc="Pick a .csv file from your device"
+          title="Import from CSV" desc="Pick a .csv file from your device"
           onPress={handlePickCSV} loading={importLoading}
+        />
+        <ActionCard
+          icon="document-outline" iconBg="#E8FFF3" iconColor="#059669"
+          title="Import from Excel (.xlsx / .xlsm)" desc="Pick an Excel workbook — first sheet is used"
+          onPress={handlePickExcel} loading={xlsxImportLoading}
         />
 
         {/* Import preview */}

@@ -1,241 +1,338 @@
 // src/components/common/ThemedAlert.tsx
-// Custom themed alert/confirm dialog that matches app design.
-// Replaces raw Alert.alert() across the app for delete confirms and warnings.
-import React, { useState, useCallback } from 'react'
+// Modern themed alert dialog — replaces all Alert.alert() calls.
+//
+// Architecture:
+//   - ThemedAlertProvider mounts at the ROOT level (App.tsx), outside navigation
+//   - themedAlert() is a synchronous function usable from any screen
+//   - showActionSheet() shows a bottom sheet for multi-option menus (replaces Alert with 3+ options)
+//   - Uses a Zustand-like ref-based singleton so it never loses the function reference
+import React, { useState, useEffect, useRef } from 'react'
 import {
-    View, Text, TouchableOpacity, StyleSheet, Modal, Pressable,
+    View, Text, TouchableOpacity, StyleSheet, Modal,
+    Pressable, Animated, Dimensions,
 } from 'react-native'
 import { LinearGradient } from 'expo-linear-gradient'
 import { Ionicons } from '@expo/vector-icons'
 import { useThemeStore, getTheme } from '../../store/themeStore'
 import { COLORS, SPACING, BORDER_RADIUS, FONT_SIZE, SHADOW } from '../../constants'
 
+const { height: SCREEN_HEIGHT } = Dimensions.get('window')
+
+// ── Types ─────────────────────────────────────────────────────────
 export interface AlertButton {
     text: string
     style?: 'default' | 'cancel' | 'destructive'
     onPress?: () => void
 }
 
-interface AlertState {
-    visible: boolean
+interface DialogConfig {
+    type: 'alert'
     title: string
-    message: string
+    message?: string
     icon?: string
-    iconColor?: string
     buttons: AlertButton[]
 }
 
-// Singleton state — we export a function to show the alert from anywhere
-let showAlertFn: ((config: Omit<AlertState, 'visible'>) => void) | null = null
-
-export function themedAlert(
-    title: string,
-    message: string,
-    buttons: AlertButton[] = [{ text: 'OK' }],
-    icon?: string,
-    iconColor?: string,
-) {
-    if (showAlertFn) {
-        showAlertFn({ title, message, buttons, icon, iconColor })
-    }
+interface SheetConfig {
+    type: 'sheet'
+    title: string
+    message?: string
+    options: AlertButton[]
 }
 
-// Mount this once at the root (App.tsx already has it via RootNavigator)
+type Config = DialogConfig | SheetConfig
+
+// ── Singleton ─────────────────────────────────────────────────────
+// Using a ref stored outside React to guarantee stable reference across renders
+const _listeners: Array<(config: Config | null) => void> = []
+
+function _emit(config: Config | null) {
+    _listeners.forEach(fn => fn(config))
+}
+
+/** Show a themed confirm/info dialog. Drop-in replacement for Alert.alert() */
+export function themedAlert(
+    title: string,
+    message?: string,
+    buttons: AlertButton[] = [{ text: 'OK' }],
+    icon?: string,
+) {
+    _emit({ type: 'alert', title, message: message || '', icon, buttons })
+}
+
+/** Show a bottom action sheet for multi-option choices (replaces Alert.alert with 3+ options) */
+export function themedActionSheet(
+    title: string,
+    message: string | undefined,
+    options: AlertButton[],
+) {
+    _emit({ type: 'sheet', title, message, options })
+}
+
+// ── Provider — mount once in App.tsx ──────────────────────────────
 export function ThemedAlertProvider() {
-    const [state, setState] = useState<AlertState>({
-        visible: false, title: '', message: '', buttons: [],
-    })
+    const [config, setConfig] = useState<Config | null>(null)
     const { mode } = useThemeStore()
     const theme = getTheme(mode)
+    const scaleAnim = useRef(new Animated.Value(0.88)).current
+    const sheetAnim = useRef(new Animated.Value(300)).current
 
-    // Register the function
-    showAlertFn = useCallback((config) => {
-        setState({ visible: true, ...config })
+    useEffect(() => {
+        const handler = (cfg: Config | null) => setConfig(cfg)
+        _listeners.push(handler)
+        return () => {
+            const idx = _listeners.indexOf(handler)
+            if (idx > -1) _listeners.splice(idx, 1)
+        }
     }, [])
 
-    const dismiss = () => setState(s => ({ ...s, visible: false }))
+    useEffect(() => {
+        if (!config) return
+        if (config.type === 'alert') {
+            scaleAnim.setValue(0.88)
+            Animated.spring(scaleAnim, {
+                toValue: 1, useNativeDriver: true,
+                tension: 280, friction: 16,
+            }).start()
+        } else {
+            sheetAnim.setValue(SCREEN_HEIGHT)
+            Animated.spring(sheetAnim, {
+                toValue: 0, useNativeDriver: true,
+                tension: 260, friction: 22,
+            }).start()
+        }
+    }, [config])
 
-    const handleButton = (btn: AlertButton) => {
+    const dismiss = () => setConfig(null)
+
+    const handleBtn = (btn: AlertButton) => {
         dismiss()
-        btn.onPress?.()
+        // Small delay so dismiss animation completes before action runs
+        setTimeout(() => btn.onPress?.(), 80)
     }
 
-    if (!state.visible) return null
+    if (!config) return null
 
-    const iconColor = state.iconColor || (
-        state.buttons.some(b => b.style === 'destructive') ? COLORS.cashOut : COLORS.primary
-    )
-    const iconBg = state.buttons.some(b => b.style === 'destructive')
-        ? COLORS.cashOutLight : COLORS.primaryLight
-    const iconName = (state.icon ||
-        (state.buttons.some(b => b.style === 'destructive') ? 'trash-outline' : 'information-circle-outline')
-    ) as any
+    // ── Confirm dialog ───────────────────────────────────────────────
+    if (config.type === 'alert') {
+        const isDestructiveAlert = config.buttons.some(b => b.style === 'destructive')
+        const iconName = (config.icon || (isDestructiveAlert ? 'trash-outline' : 'information-circle-outline')) as any
+        const iconColor = isDestructiveAlert ? COLORS.cashOut : COLORS.primary
+        const iconBg = isDestructiveAlert ? COLORS.cashOutLight : COLORS.primaryLight
 
-    return (
-        <Modal transparent animationType="fade" visible={state.visible} onRequestClose={dismiss}>
-            <Pressable style={s.backdrop} onPress={dismiss} />
-            <View style={s.center} pointerEvents="box-none">
-                <View style={[s.dialog, { backgroundColor: theme.surface }]}>
-                    {/* Icon */}
-                    <View style={[s.iconWrap, { backgroundColor: iconBg }]}>
-                        <Ionicons name={iconName} size={28} color={iconColor} />
-                    </View>
+        return (
+            <Modal transparent animationType="none" visible statusBarTranslucent onRequestClose={dismiss}>
+                <Pressable style={s.overlay} onPress={dismiss}>
+                    <Animated.View
+                        style={[s.dialog, { backgroundColor: theme.surface, transform: [{ scale: scaleAnim }] }]}
+                        // Prevent tap from propagating to Pressable backdrop
+                        onStartShouldSetResponder={() => true}
+                    >
+                        {/* Icon circle */}
+                        <View style={[s.iconCircle, { backgroundColor: iconBg }]}>
+                            <Ionicons name={iconName} size={30} color={iconColor} />
+                        </View>
 
-                    {/* Text */}
-                    <Text style={[s.title, { color: theme.text }]}>{state.title}</Text>
-                    {state.message ? (
-                        <Text style={[s.message, { color: theme.textSecondary }]}>{state.message}</Text>
-                    ) : null}
+                        {/* Title */}
+                        <Text style={[s.dialogTitle, { color: theme.text }]}>{config.title}</Text>
 
-                    {/* Buttons */}
-                    <View style={[s.btnRow, state.buttons.length > 2 && s.btnCol]}>
-                        {state.buttons.map((btn, i) => {
-                            const isDestructive = btn.style === 'destructive'
-                            const isCancel = btn.style === 'cancel'
-                            const isLast = i === state.buttons.length - 1
-                            const isPrimary = !isCancel && isLast
+                        {/* Message */}
+                        {!!config.message && (
+                            <Text style={[s.dialogMsg, { color: theme.textSecondary }]}>{config.message}</Text>
+                        )}
 
-                            if (isCancel) {
+                        {/* Divider */}
+                        <View style={[s.divider, { backgroundColor: theme.border }]} />
+
+                        {/* Buttons */}
+                        <View style={[s.btnRow, config.buttons.length > 2 && { flexDirection: 'column' }]}>
+                            {config.buttons.map((btn, i) => {
+                                const isCancelBtn = btn.style === 'cancel'
+                                const isDestBtn = btn.style === 'destructive'
+                                const isLastBtn = i === config.buttons.length - 1
+                                const showDivider = i < config.buttons.length - 1 && config.buttons.length <= 2
+
                                 return (
-                                    <TouchableOpacity
-                                        key={i}
-                                        style={[s.cancelBtn, { borderColor: theme.border }]}
-                                        onPress={() => handleButton(btn)}
-                                        activeOpacity={0.8}
-                                    >
-                                        <Text style={[s.cancelText, { color: theme.textSecondary }]}>{btn.text}</Text>
-                                    </TouchableOpacity>
-                                )
-                            }
-
-                            if (isDestructive) {
-                                return (
-                                    <TouchableOpacity
-                                        key={i}
-                                        style={s.destructiveBtn}
-                                        onPress={() => handleButton(btn)}
-                                        activeOpacity={0.88}
-                                    >
-                                        <LinearGradient
-                                            colors={['#FF647C', '#E84560']}
-                                            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                                            style={s.btnGrad}
+                                    <React.Fragment key={i}>
+                                        {showDivider && config.buttons.length === 2 && (
+                                            <View style={[s.btnDivider, { backgroundColor: theme.border }]} />
+                                        )}
+                                        <TouchableOpacity
+                                            style={[
+                                                s.dialogBtn,
+                                                isCancelBtn && s.cancelDialogBtn,
+                                                isDestBtn && s.destructDialogBtn,
+                                                !isCancelBtn && !isDestBtn && s.primaryDialogBtn,
+                                                config.buttons.length > 2 && { flex: 0, width: '100%', marginBottom: SPACING.sm },
+                                            ]}
+                                            onPress={() => handleBtn(btn)}
+                                            activeOpacity={0.82}
                                         >
-                                            <Ionicons name="trash-outline" size={15} color="#fff" />
-                                            <Text style={s.destructiveText}>{btn.text}</Text>
-                                        </LinearGradient>
-                                    </TouchableOpacity>
+                                            {isDestBtn && <Ionicons name="trash-outline" size={15} color="#fff" style={{ marginRight: 4 }} />}
+                                            <Text style={[
+                                                s.dialogBtnText,
+                                                isCancelBtn && { color: theme.textSecondary },
+                                                isDestBtn && { color: '#fff' },
+                                                !isCancelBtn && !isDestBtn && { color: COLORS.primary },
+                                            ]}>
+                                                {btn.text}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    </React.Fragment>
                                 )
-                            }
+                            })}
+                        </View>
+                    </Animated.View>
+                </Pressable>
+            </Modal>
+        )
+    }
+
+    // ── Action sheet ─────────────────────────────────────────────────
+    if (config.type === 'sheet') {
+        return (
+            <Modal transparent animationType="none" visible statusBarTranslucent onRequestClose={dismiss}>
+                <View style={s.sheetOverlay}>
+                    <Pressable style={StyleSheet.absoluteFill} onPress={dismiss} />
+                    <Animated.View
+                        style={[
+                            s.sheet,
+                            { backgroundColor: theme.surface, transform: [{ translateY: sheetAnim }] },
+                        ]}
+                    >
+                        {/* Handle */}
+                        <View style={[s.sheetHandle, { backgroundColor: theme.border }]} />
+
+                        {/* Header */}
+                        {(config.title || config.message) && (
+                            <View style={[s.sheetHeader, { borderBottomColor: theme.border }]}>
+                                {config.title && <Text style={[s.sheetTitle, { color: theme.text }]}>{config.title}</Text>}
+                                {config.message && <Text style={[s.sheetMsg, { color: theme.textSecondary }]}>{config.message}</Text>}
+                            </View>
+                        )}
+
+                        {/* Options */}
+                        {config.options.map((opt, i) => {
+                            const isCancel = opt.style === 'cancel'
+                            const isDestruct = opt.style === 'destructive'
+                            if (isCancel) return null // render cancel at bottom
 
                             return (
                                 <TouchableOpacity
                                     key={i}
-                                    style={[s.primaryBtn, { opacity: 1 }]}
-                                    onPress={() => handleButton(btn)}
-                                    activeOpacity={0.88}
+                                    style={[s.sheetOption, { borderBottomColor: theme.border }]}
+                                    onPress={() => handleBtn(opt)}
+                                    activeOpacity={0.75}
                                 >
-                                    <LinearGradient
-                                        colors={['#5B5FED', '#7C3AED']}
-                                        start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                                        style={s.btnGrad}
-                                    >
-                                        <Text style={s.primaryText}>{btn.text}</Text>
-                                    </LinearGradient>
+                                    <Text style={[
+                                        s.sheetOptionText,
+                                        { color: isDestruct ? COLORS.cashOut : theme.text },
+                                        isDestruct && { fontWeight: '700' },
+                                    ]}>
+                                        {opt.text}
+                                    </Text>
+                                    {isDestruct && <Ionicons name="trash-outline" size={17} color={COLORS.cashOut} />}
                                 </TouchableOpacity>
                             )
                         })}
-                    </View>
+
+                        {/* Cancel button */}
+                        {config.options.some(o => o.style === 'cancel') && (
+                            <TouchableOpacity
+                                style={[s.sheetCancel, { backgroundColor: theme.surfaceSecondary }]}
+                                onPress={() => handleBtn(config.options.find(o => o.style === 'cancel')!)}
+                                activeOpacity={0.8}
+                            >
+                                <Text style={[s.sheetCancelText, { color: theme.textSecondary }]}>Cancel</Text>
+                            </TouchableOpacity>
+                        )}
+                    </Animated.View>
                 </View>
-            </View>
-        </Modal>
-    )
+            </Modal>
+        )
+    }
+
+    return null
 }
 
+// ── Styles ────────────────────────────────────────────────────────
 const s = StyleSheet.create({
-    backdrop: {
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(0,0,0,0.5)',
-    },
-    center: {
-        ...StyleSheet.absoluteFillObject,
+    // Dialog
+    overlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.55)',
         alignItems: 'center',
         justifyContent: 'center',
         padding: SPACING.xl,
     },
     dialog: {
         width: '100%',
-        maxWidth: 360,
+        maxWidth: 340,
         borderRadius: BORDER_RADIUS.xl,
-        padding: SPACING.xl,
+        paddingTop: SPACING.xl,
+        paddingHorizontal: SPACING.xl,
+        paddingBottom: SPACING.md,
         alignItems: 'center',
         ...SHADOW.lg,
     },
-    iconWrap: {
-        width: 64,
-        height: 64,
-        borderRadius: 20,
-        alignItems: 'center',
-        justifyContent: 'center',
+    iconCircle: {
+        width: 68, height: 68, borderRadius: 22,
+        alignItems: 'center', justifyContent: 'center',
         marginBottom: SPACING.md,
     },
-    title: {
-        fontSize: FONT_SIZE.lg,
-        fontWeight: '800',
-        textAlign: 'center',
-        marginBottom: SPACING.sm,
-        letterSpacing: -0.3,
+    dialogTitle: {
+        fontSize: FONT_SIZE.lg, fontWeight: '800',
+        textAlign: 'center', marginBottom: SPACING.sm, letterSpacing: -0.3,
     },
-    message: {
-        fontSize: FONT_SIZE.sm,
-        textAlign: 'center',
-        lineHeight: 20,
-        marginBottom: SPACING.lg,
+    dialogMsg: {
+        fontSize: FONT_SIZE.sm, textAlign: 'center',
+        lineHeight: 20, marginBottom: SPACING.md,
     },
+    divider: { height: 1, width: '100%', marginBottom: SPACING.md },
     btnRow: {
-        flexDirection: 'row',
-        gap: SPACING.sm,
-        width: '100%',
+        flexDirection: 'row', gap: SPACING.sm, width: '100%', paddingBottom: SPACING.sm,
     },
-    btnCol: {
-        flexDirection: 'column',
+    btnDivider: { width: 1, alignSelf: 'stretch' },
+
+    dialogBtn: {
+        flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+        paddingVertical: 13, borderRadius: BORDER_RADIUS.md,
     },
-    cancelBtn: {
+    cancelDialogBtn: { borderWidth: 1.5, borderColor: '#E5E7EB' },
+    destructDialogBtn: { backgroundColor: COLORS.cashOut },
+    primaryDialogBtn: { borderWidth: 1.5, borderColor: COLORS.primary },
+    dialogBtnText: { fontSize: FONT_SIZE.md, fontWeight: '700' },
+
+    // Sheet
+    sheetOverlay: {
         flex: 1,
-        paddingVertical: 13,
-        borderRadius: BORDER_RADIUS.md,
-        alignItems: 'center',
-        borderWidth: 1.5,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'flex-end',
     },
-    cancelText: {
-        fontSize: FONT_SIZE.md,
-        fontWeight: '600',
+    sheet: {
+        borderTopLeftRadius: 28, borderTopRightRadius: 28,
+        paddingBottom: 34, overflow: 'hidden',
+        ...SHADOW.lg,
     },
-    destructiveBtn: {
-        flex: 1,
-        borderRadius: BORDER_RADIUS.md,
-        overflow: 'hidden',
+    sheetHandle: {
+        width: 44, height: 4, borderRadius: 2,
+        alignSelf: 'center', marginTop: 12, marginBottom: SPACING.sm,
     },
-    primaryBtn: {
-        flex: 1,
-        borderRadius: BORDER_RADIUS.md,
-        overflow: 'hidden',
+    sheetHeader: {
+        paddingHorizontal: SPACING.lg, paddingBottom: SPACING.md,
+        borderBottomWidth: 1, marginBottom: SPACING.sm,
     },
-    btnGrad: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 13,
-        gap: 6,
+    sheetTitle: { fontSize: FONT_SIZE.md, fontWeight: '700', marginBottom: 2 },
+    sheetMsg: { fontSize: FONT_SIZE.sm, lineHeight: 18 },
+    sheetOption: {
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+        paddingHorizontal: SPACING.lg, paddingVertical: 16,
+        borderBottomWidth: StyleSheet.hairlineWidth,
     },
-    destructiveText: {
-        fontSize: FONT_SIZE.md,
-        fontWeight: '700',
-        color: '#fff',
+    sheetOptionText: { fontSize: FONT_SIZE.lg },
+    sheetCancel: {
+        margin: SPACING.md, borderRadius: BORDER_RADIUS.lg,
+        paddingVertical: 15, alignItems: 'center',
     },
-    primaryText: {
-        fontSize: FONT_SIZE.md,
-        fontWeight: '700',
-        color: '#fff',
-    },
+    sheetCancelText: { fontSize: FONT_SIZE.md, fontWeight: '700' },
 })

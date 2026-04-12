@@ -3,7 +3,7 @@ import React, { useState } from 'react'
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   KeyboardAvoidingView, Platform, ActivityIndicator, Alert,
-  ImageBackground, Dimensions,
+  ImageBackground, Dimensions, Image
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -57,7 +57,11 @@ export default function LoginScreen({ navigation }: any) {
 
         <View style={styles.heroContent}>
           <View style={styles.logoWrap}>
-            <Ionicons name="wallet" size={32} color="#fff" />
+            {/* <Ionicons name="wallet" size={32} color="#fff" /> */}
+            <Image
+              source={require('../../assets/icon.png')}
+              style={{ width: 32, height: 32 }}
+            />
           </View>
           <Text style={styles.appName}>CashFlow</Text>
           <Text style={styles.tagline}>Smart money tracking,{'\n'}built for teams.</Text>

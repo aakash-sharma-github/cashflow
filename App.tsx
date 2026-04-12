@@ -10,6 +10,7 @@ import { useThemeStore } from './src/store/themeStore'
 import { useTodoStore } from './src/store/todoStore'
 import { useOfflineSync } from './src/hooks/useOfflineSync'
 import { usePushNotifications } from './src/hooks/usePushNotifications'
+import { ThemedAlertProvider } from './src/components/common/ThemedAlert'
 
 // Keep the native splash visible until we explicitly hide it
 // This prevents the "white flash" between native splash and React render
@@ -51,6 +52,7 @@ function AppContent() {
   return (
     <>
       <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />
+      <ThemedAlertProvider />
       <RootNavigator />
     </>
   )
