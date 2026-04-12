@@ -17,7 +17,8 @@
       "infoPlist": {
         "NSFaceIDUsageDescription": "Used for secure authentication",
         "NSUserNotificationUsageDescription": "We send notifications when you receive book invitations."
-      }
+      },
+      "jsEngine": "hermes"
     },
     "android": {
       "adaptiveIcon": {
@@ -44,7 +45,9 @@
             "DEFAULT"
           ]
         }
-      ]
+      ],
+      "versionCode": 1,
+      "jsEngine": "hermes"
     },
     "notification": {
       "icon": "./assets/notification-icon.png",
@@ -81,7 +84,16 @@
             "newArchEnabled": true
           },
           "android": {
-            "newArchEnabled": true
+            "newArchEnabled": true,
+            "enableProguardInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true,
+            "useLegacyPackaging": false,
+            "packagingOptions": {
+              "pickFirst": [
+                "**/libcrypto.so",
+                "**/libssl.so"
+              ]
+            }
           }
         }
       ]
@@ -91,6 +103,19 @@
         "projectId": "2dd5e903-ee74-4052-aa22-b8e1751a1ebf"
       }
     },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/2dd5e903-ee74-4052-aa22-b8e1751a1ebf",
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    },
+    "assetBundlePatterns": [
+      "assets/*",
+      "assets/fonts/*"
+    ],
     "owner": "aakash-expo"
   }
 }

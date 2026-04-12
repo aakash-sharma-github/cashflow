@@ -27,7 +27,6 @@ import EditProfileScreen from '../screens/EditProfileScreen'
 import PrivacyPolicyScreen from '../screens/PrivacyPolicyScreen'
 import TermsScreen from '../screens/TermsScreen'
 import OfflineBanner from '../components/common/OfflineBanner'
-import { ThemedAlertProvider } from '../components/common/ThemedAlert'
 
 const Stack = createStackNavigator()
 const Tab = createBottomTabNavigator()
@@ -111,7 +110,6 @@ function AppStack() {
   return (
     <>
       <OfflineBanner />
-      <ThemedAlertProvider />
       <Stack.Navigator
         screenOptions={{
           headerStyle: { backgroundColor: theme.headerBg, elevation: 0, shadowOpacity: 0 },
@@ -141,7 +139,10 @@ function AppStack() {
           component={CreateBookScreen}
           options={({ route }: any) => ({
             title: route.params?.book ? 'Edit Book' : 'New Book',
-            presentation: 'modal',
+            // iOS: modal sheet look; Android: full card (modal on Android ignores contentStyle,
+            // causing the window background to bleed through as white even in dark mode)
+            presentation: Platform.OS === 'ios' ? 'modal' : 'card',
+            gestureEnabled: false,
             contentStyle: { backgroundColor: theme.background },
             headerStyle: { backgroundColor: theme.background },
           })}

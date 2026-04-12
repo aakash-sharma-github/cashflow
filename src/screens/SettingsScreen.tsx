@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import {
     View, Text, ScrollView, TouchableOpacity, StyleSheet,
-    Switch, Image, Alert, ActivityIndicator,
+    Switch, Image, ActivityIndicator,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -12,10 +12,11 @@ import { useAuthStore } from '../store/authStore'
 import { useThemeStore, getTheme } from '../store/themeStore'
 import { invitationsService } from '../services/invitationsService'
 import { useBooksStore } from '../store/booksStore'
+import { themedAlert, themedActionSheet } from '../components/common/ThemedAlert'
 import { COLORS, SPACING, BORDER_RADIUS, FONT_SIZE, SHADOW } from '../constants'
 import { getInitials, getDisplayName } from '../utils'
+import { APP_VERSION, BUILD_NUMBER } from '../utils/version'
 import type { BookMember } from '../types'
-import { APP_VERSION } from '../utils/version'
 
 export default function SettingsScreen({ navigation }: any) {
     const { user, signOut } = useAuthStore()
@@ -245,18 +246,13 @@ export default function SettingsScreen({ navigation }: any) {
                         iconColor={COLORS.primary}
                         label="About Us"
                         sublabel={`CashFlow v${APP_VERSION}`}
-                        onPress={() =>
-                            Alert.alert(
-                                'CashFlow',
-                                `Version ${APP_VERSION}\n\nA smart, collaborative expense tracker built for teams and individuals.\n\n© 2026 CashFlow. All rights reserved.`,
-                                [{ text: 'OK' }]
-                            )
-                        }
+                        onPress={() => themedAlert(
+                            'CashFlow',
+                            'Version ' + APP_VERSION + '\n\nA smart, collaborative expense tracker built for teams and individuals.\n\n© 2026 CashFlow. All rights reserved.',
+                            [{ text: 'OK' }]
+                        )}
                     />
                 </View>
-                <Text style={{ fontSize: FONT_SIZE.xs, color: theme.textTertiary, marginTop: SPACING.sm, marginLeft: 4 }}>
-                    Made with ❤️ by Aakash sharma.
-                </Text>
 
                 {/* ── Sign Out ────────────────────────────────── */}
                 <SectionHeader title="Account" />
@@ -267,7 +263,7 @@ export default function SettingsScreen({ navigation }: any) {
                         iconColor={COLORS.cashOut}
                         label="Sign Out"
                         danger
-                        onPress={() => Alert.alert(
+                        onPress={() => themedAlert(
                             'Sign Out',
                             'Are you sure you want to sign out?',
                             [
@@ -276,6 +272,16 @@ export default function SettingsScreen({ navigation }: any) {
                             ]
                         )}
                     />
+                </View>
+
+                {/* ── Made with love ── */}
+                <View style={[styles.madeWith, { borderTopColor: theme.border }]}>
+                    <Text style={[styles.madeWithText, { color: theme.textTertiary }]}>
+                        Made with ❤️ by Aakash Sharma
+                    </Text>
+                    <Text style={[styles.madeWithSub, { color: theme.textTertiary }]}>
+                        CashFlow v{APP_VERSION}
+                    </Text>
                 </View>
 
                 <View style={{ height: SPACING.xl }} />
@@ -297,6 +303,21 @@ const styles = StyleSheet.create({
         letterSpacing: -0.5,
     },
     scroll: { paddingHorizontal: SPACING.lg, paddingBottom: 40 },
+    madeWith: {
+        marginTop: SPACING.xl,
+        paddingTop: SPACING.lg,
+        borderTopWidth: 1,
+        alignItems: 'center',
+        gap: 4,
+    },
+    madeWithText: {
+        fontSize: FONT_SIZE.sm,
+        fontWeight: '500',
+        letterSpacing: 0.2,
+    },
+    madeWithSub: {
+        fontSize: FONT_SIZE.xs,
+    },
 
     sectionHeader: {
         fontSize: FONT_SIZE.xs,
