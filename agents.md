@@ -1,252 +1,192 @@
-# CashFlow — Agent Progress & Context
+# CashFlow — Agent Context & Progress
 
-> **Project:** CashFlow — Multi-Book Expense Tracker  
 > **Stack:** React Native (Expo ~51) + Supabase  
-> **Version:** 1.2.0  
+> **Version:** 1.0.0 (see app.json — single source of truth)  
 > **Status:** 🟢 Production Ready
-
----
-
-## 📋 Project Summary
-
-CashFlow is a mobile-first expense tracking app with multi-book ledgers, real-time collaboration, offline-first CRUD, CSV/PDF export, push notifications, dark/light mode, and in-app legal screens.
 
 ---
 
 ## 🏗️ Architecture
 
 ```
-cashflow/
-├── App.tsx                     ← boot: initialize + theme + offline sync + push
-├── assets/                     ← icon.png, splash.png, adaptive-icon.png, notification-icon.png
-├── src/
-│   ├── screens/ (13 screens)
-│   ├── services/ (9 services)
-│   ├── store/ (6 Zustand stores)
-│   ├── hooks/ (3 hooks)
-│   ├── navigation/             ← Stack + Tab + theme-aware
-│   ├── components/common/
-│   └── types, constants, utils
-├── supabase/
-│   ├── migrations/ (3 SQL files)
-│   └── functions/send-invite/
-└── production.md
+App.tsx         → boot: initialize() + loadTheme() + loadTodos() in parallel
+                  ThemedAlertProvider at root (above NavigationContainer)
+navigation/     → Stack + Tab + theme-aware modal contentStyle
+screens/        → 13 screens, all inline theme props (zero StyleSheet.create violations)
+services/       → 9 services: supabase, auth, books, entries, invitations,
+                  localDb, sync, export, notifications
+store/          → 7 Zustand stores: auth, books, entries, offline, inbox, theme, todo
+hooks/          → useEntriesRealtime, useOfflineSync, usePushNotifications
+components/     → OfflineBanner, ThemedAlert (dialog + action sheet)
+utils/version   → reads APP_VERSION / BUILD_NUMBER from expo-constants at runtime
 ```
 
 ---
 
-## 🗄️ Database Schema
+## 🗄️ Database
 
-| Table | Purpose |
-|-------|---------|
-| `profiles` | Users (id, email, full_name, avatar_url, push_token) |
-| `books` | Ledger books (name, color, currency, owner_id) |
-| `book_members` | Many-to-many users↔books (role: owner/member) |
-| `entries` | Cash in/out transactions |
-| `invitations` | Pending/accepted/rejected invites |
+**Run migrations in order: 001 → 002 → 003 → 004**
+
+Migration 004 is definitive — it:
+1. Clears ALL book_members INSERT policies using a DO block
+2. Adds a single simple policy: `WITH CHECK (auth.uid() = user_id)`
+3. Sets `OWNER TO postgres` on all SECURITY DEFINER functions
+4. Recreates accept/reject invitation functions with proper ownership
+
+**Tables:** `profiles`, `books`, `book_members`, `entries`, `invitations`
+
+**Critical:** `profiles` needs a `push_token` column (added in migration or manually):
+```sql
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS push_token TEXT;
+```
 
 ---
 
 ## ✅ Completed Phases
 
-### Phase 1 — Auth + Books CRUD
-- [x] Email magic link (OTP)
-- [x] Google OAuth
-- [x] SecureStore chunking (>2KB fix)
-- [x] Books CRUD with offline-first
-- [x] RLS policies (003_fix_rls_final.sql)
+### Phase 1 — Auth + Books
+- [x] Magic link OTP + Google OAuth
+- [x] ChunkedSecureStore (>2KB session fix)
+- [x] Hard 8s timeout on initialize() — splash never freezes
+- [x] Books CRUD offline-first + RLS (migration 004)
 
-### Phase 2 — Entries CRUD + UI
+### Phase 2 — Entries
 - [x] Entries CRUD with optimistic updates
-- [x] Native date + time picker (iOS modal / Android sequential)
-- [x] Filter by All / Cash In / Cash Out
-- [x] Paginated entries list
+- [x] Native date+time picker (iOS modal / Android ref-based sequential)
+- [x] No KAV on Android (prevents scroll-disappear bug)
+- [x] Filter All / In / Out + pagination
 
 ### Phase 3 — Collaboration
-- [x] Email invitations via Resend edge function
-- [x] Accept / Reject invitations
-- [x] Book member management
+- [x] Email invitations (Resend edge function)
+- [x] Accept/reject with SECURITY DEFINER functions
 - [x] Real-time sync via Supabase Realtime
+- [x] Inbox tab badge with live count
 
-### Phase 4 — Offline First
-- [x] AsyncStorage local cache (books + entries)
+### Phase 4 — Offline
+- [x] AsyncStorage local cache
 - [x] Persistent operation queue (survives restarts)
-- [x] Auto-sync on reconnect / app foreground
-- [x] Animated offline banner
+- [x] Auto-sync on reconnect + animated OfflineBanner
 
 ### Phase 5 — Export / Import
-- [x] CSV export (all entries, native share sheet)
-- [x] PDF export (branded report via expo-print)
-- [x] CSV import with preview + validation
+- [x] CSV export + import
+- [x] PDF export (expo-print branded report)
+- [x] Excel export (.xlsx with summary sheet)
+- [x] Excel import (.xlsx + .xlsm)
 
-### Phase 6 — Push Notifications + Badge
-- [x] Expo push token registration on device
-- [x] Token saved to profiles.push_token
-- [x] Realtime listener fires local notification on new invite
-- [x] Inbox tab badge (red dot) with live count
-- [x] Badge clears when app comes to foreground
+### Phase 6 — Notifications
+- [x] Local notifications (no Firebase required)
+- [x] Supabase Realtime invite listener fires local notification
+- [x] Inbox badge red dot with count
 
-### Phase 7 — UI/UX Polish
-- [x] Dark / Light mode with persistence
-- [x] All screens fully dark-mode aware (inline theme props only — no StyleSheet.create() violations)
-- [x] @expo/vector-icons Ionicons throughout
-- [x] expo-linear-gradient on key surfaces
-- [x] Edit Profile (name update)
-- [x] In-app Privacy Policy screen
-- [x] In-app Terms & Conditions screen
-- [x] Members section shows unique invited people only (excludes self)
+### Phase 7 — UI Polish
+- [x] Dark/light mode — zero StyleSheet.create violations (auto-checked)
+- [x] ThemedAlert: animated dialog + bottom action sheet (replaces all Alert.alert)
+- [x] Modal contentStyle fix (CreateBook, AddEditEntry, EditProfile now respect dark mode)
+- [x] Entry long press → action sheet (Edit / Delete / Cancel)
+- [x] Book long press → action sheet (Edit / Delete / Cancel)
+
+### Phase 8 — Todos
+- [x] Offline Zustand store → AsyncStorage persistence
+- [x] Priority (High/Medium/Low) + search + filter
+- [x] Animated checkbox, due date badges, notes
+- [x] Add sheet + edit modal + swipe hints
+
+### Phase 9 — Versioning
+- [x] `app.json` is single source of truth for version
+- [x] `eas.json` has `autoIncrement: true` for versionCode
+- [x] `scripts/bump-version.js` → `npm run version:patch|minor|major`
+- [x] `src/utils/version.ts` reads live version via expo-constants
+- [x] Settings screen shows live version (never hardcoded)
 
 ---
 
 ## 🔭 Future Scope Checkpoints
 
 ### 🔲 FP-01 — Monthly Analytics Dashboard
-**Priority: High**
-- Aggregate entries by month using Supabase RPC
-- Bar chart (cash in vs out per month) using recharts/Victory
-- Month-over-month comparison
-- Category tagging on entries (Food, Transport, Salary, etc.)
-- Pie chart breakdown by category
+- Bar chart: cash in vs out per month (Victory Native / react-native-chart-kit)
+- Month-over-month delta indicator
+- Category breakdown pie chart
 - Export analytics as PDF
 
 ### 🔲 FP-02 — Category & Tag System
-**Priority: High**
-- Add `category` field to entries table (migration required)
-- Predefined categories: Food, Transport, Housing, Salary, Business, Other
-- Custom category creation per book
+- `category` column on entries (migration required)
+- Predefined + custom categories per book
 - Filter entries by category
-- Category icons + colors
-- Budget limits per category with alert when exceeded
+- Budget limits per category with over-budget alert
 
 ### 🔲 FP-03 — Recurring Entries
-**Priority: Medium**
-- Mark entry as recurring (daily / weekly / monthly / custom)
-- Auto-generate upcoming entries
-- `recurring_entries` table with frequency + next_date
-- Notifications before recurring entry is due
+- `recurring_entries` table: frequency + next_date
+- Auto-generate entries on schedule
+- Reminder notification before due date
 
-### 🔲 FP-04 — Multi-Currency & Exchange Rates
-**Priority: Medium**
-- Fetch live exchange rates (free API: exchangerate-api.com)
-- Display all book balances in a single base currency on HomeScreen
+### 🔲 FP-04 — Multi-Currency + Live Rates
+- Free exchange rate API (exchangerate-api.com)
+- Show all books in one base currency on HomeScreen
 - Per-entry currency override
-- Historical rate snapshots stored with entry
+- Historical rate snapshot stored with entry
 
 ### 🔲 FP-05 — Advanced Export
-**Priority: Medium**
-- Export date range filter (e.g., last 30 days, custom range)
+- Date range filter on export
 - Export by category
-- Excel (.xlsx) export using SheetJS
-- Scheduled weekly email reports via Edge Function
+- Scheduled weekly email report (Edge Function)
 
-### 🔲 FP-06 — Notifications Center
-**Priority: Medium**
-- Full notification history screen (not just pending invites)
-- Notification types: new entry by collaborator, balance threshold alert, recurring entry reminder
-- Mark as read / clear all
-- Push notification deep links (tap notification → open relevant book)
+### 🔲 FP-06 — Deep Notification Center
+- Full notification history (not just pending invites)
+- Types: new entry by collaborator, balance threshold, recurring reminder
+- Tap notification → deep link into relevant book
 
 ### 🔲 FP-07 — Biometric / PIN Lock
-**Priority: Medium**
-- Optional app-level lock using expo-local-authentication
-- FaceID / TouchID on iOS
-- Fingerprint on Android
-- PIN fallback
+- expo-local-authentication (FaceID / TouchID / Fingerprint)
 - Auto-lock timeout setting
+- PIN fallback
 
-### 🔲 FP-08 — Widgets (iOS / Android)
-**Priority: Low**
-- Home screen widget showing total balance
-- Quick-add entry widget
+### 🔲 FP-08 — Home Screen Widget
+- Balance widget for iOS / Android home screen
 - Requires bare workflow or expo-widgets (experimental)
 
 ### 🔲 FP-09 — Web Version
-**Priority: Low**
-- Expo Web build for the main CRUD flows
-- Shared codebase, responsive layout
-- Useful for desktop entry on larger amounts
+- Expo Web build for main CRUD flows
+- Responsive layout, useful for desktop data entry
 
 ### 🔲 FP-10 — Audit Log
-**Priority: Low**
-- `entry_history` table: who changed what and when
-- Visible per-entry in a "History" modal
-- Useful for business/team accountability
+- `entry_history` table: who changed what, when
+- Per-entry "History" modal
+- Business accountability use case
 
-### 🔲 FP-11 — Book Templates
-**Priority: Low**
-- Pre-configured book templates (Personal Budget, Travel Expenses, Project Budget)
-- Starter entries / categories
-- Import template when creating a new book
+### 🔲 FP-11 — Firebase Remote Push
+- Add `google-services.json` to Android build
+- Replace local notification with FCM remote push
+- Works when app is closed / background
+- Required for: balance alerts, scheduled reminders
 
-### 🔲 FP-12 — Supabase Edge Function: Smart Summaries
-**Priority: Low**
-- Weekly AI-generated spending insights via Edge Function + Claude API
+### 🔲 FP-12 — AI Spending Insights
+- Weekly Claude API summary via Edge Function
 - "You spent 23% more on Food this week"
-- Delivered as push notification + in-app card
+- In-app insight card + push notification
 
 ---
 
-## 🔧 Environment Variables
+## 🐛 Known Issues / Tech Debt
+
+| Issue | Severity | Notes |
+|-------|----------|-------|
+| Push only works when app is open | Medium | Local notifications only; FP-11 adds FCM |
+| Offline sync is last-write-wins | Low | No CRDT; acceptable at current scale |
+| No pagination on Settings members | Low | <20 members for most users |
+| Google OAuth redirect varies per env | Info | Documented in production.md |
+
+---
+
+## 🔑 Environment Variables
 
 ```env
-EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-EXPO_PUBLIC_EAS_PROJECT_ID=your-eas-project-id
+EXPO_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
+EXPO_PUBLIC_SUPABASE_ANON_KEY=eyJ...
+EXPO_PUBLIC_EAS_PROJECT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
 
-Edge Function secrets (set via `supabase secrets set`):
+Supabase Edge Function secrets (set via `supabase secrets set`):
 ```
 RESEND_API_KEY=re_xxxx
 APP_URL=cashflow://auth/callback
 ```
-
----
-
-## 🐛 Known Issues / Technical Debt
-
-| Issue | Status | Notes |
-|-------|--------|-------|
-| Push tokens only work on physical device | By design | Expo Go simulator limitation |
-| Offline sync is last-write-wins | Acceptable | No CRDT needed at this scale |
-| No pagination on Settings members list | Low priority | Most users have <20 members |
-| Google OAuth redirect URI varies per environment | Documented | See production.md |
-
----
-
-## 📦 All Dependencies
-
-```json
-"@expo/vector-icons": "^14.0.2",
-"@react-native-async-storage/async-storage": "1.23.1",
-"@react-native-community/datetimepicker": "8.2.0",
-"@react-native-community/netinfo": "11.3.2",
-"@react-navigation/bottom-tabs": "^6.5.20",
-"@react-navigation/native": "^6.1.17",
-"@react-navigation/stack": "^6.3.29",
-"@supabase/supabase-js": "^2.43.5",
-"date-fns": "^3.6.0",
-"expo": "~51.0.18",
-"expo-auth-session": "~5.5.2",
-"expo-build-properties": "~0.12.3",
-"expo-device": "~6.0.2",
-"expo-document-picker": "~12.0.2",
-"expo-file-system": "~17.0.1",
-"expo-linear-gradient": "~13.0.2",
-"expo-notifications": "~0.28.9",
-"expo-print": "~13.0.1",
-"expo-secure-store": "~13.0.2",
-"expo-sharing": "~12.0.1",
-"expo-status-bar": "~1.12.1",
-"expo-web-browser": "~13.0.3",
-"react": "18.2.0",
-"react-native": "0.74.3",
-"react-native-gesture-handler": "~2.17.1",
-"react-native-reanimated": "~3.10.1",
-"react-native-safe-area-context": "4.10.5",
-"react-native-screens": "3.31.1",
-"zustand": "^4.5.4"
-```
-
----
-
-*v1.2.0 — Production Ready. See production.md for publishing guide.*

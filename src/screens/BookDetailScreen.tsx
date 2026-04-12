@@ -2,7 +2,7 @@
 import React, { useEffect, useCallback, useState } from 'react'
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  ActivityIndicator, RefreshControl, Alert, Pressable,
+  ActivityIndicator, RefreshControl, Pressable,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -14,6 +14,7 @@ import { useAuthStore } from '../store/authStore'
 import { useThemeStore, getTheme } from '../store/themeStore'
 import { useEntriesRealtime } from '../hooks/useEntriesRealtime'
 import { COLORS, SPACING, BORDER_RADIUS, FONT_SIZE, SHADOW } from '../constants'
+import { themedAlert, themedActionSheet } from '../components/common/ThemedAlert'
 import { formatAmount, formatEntryDate } from '../utils'
 import type { Entry, EntryFilter } from '../types'
 
@@ -68,18 +69,42 @@ export default function BookDetailScreen({ route, navigation }: any) {
     setRefreshing(false)
   }
 
-  const handleDelete = (e: Entry) => {
-    Alert.alert(
-      'Delete Entry',
-      `Delete ${formatAmount(e.amount, currentBook?.currency)} ${e.type === 'cash_in' ? 'Cash In' : 'Cash Out'}?`,
+  const handleEntryLongPress = (e: Entry) => {
+    const isCashIn = e.type === 'cash_in'
+    const label = `${isCashIn ? '+ ' : '- '}${formatAmount(e.amount, currentBook?.currency)}`
+    themedActionSheet(
+      label,
+      e.note || (isCashIn ? 'Cash In' : 'Cash Out'),
       [
-        { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Delete', style: 'destructive', onPress: async () => {
-            const { error } = await deleteEntry(e.id, bookId)
-            if (error) Alert.alert('Error', error)
-          }
+          text: 'Edit Entry',
+          onPress: () => navigation.navigate('AddEditEntry', {
+            bookId,
+            entry: e,
+            currency: currentBook?.currency,
+          }),
         },
+        {
+          text: 'Delete Entry',
+          style: 'destructive' as const,
+          onPress: () => themedAlert(
+            'Delete Entry',
+            `Remove ${label}${e.note ? ` "${e.note}"` : ''}? This cannot be undone.`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Delete',
+                style: 'destructive',
+                onPress: async () => {
+                  const { error } = await deleteEntry(e.id, bookId)
+                  if (error) themedAlert('Error', error)
+                },
+              },
+            ],
+            'trash-outline'
+          ),
+        },
+        { text: 'Cancel', style: 'cancel' as const },
       ]
     )
   }
@@ -91,7 +116,7 @@ export default function BookDetailScreen({ route, navigation }: any) {
       <Pressable
         style={({ pressed }) => [s.entryCard, { backgroundColor: theme.surface }, pressed && { opacity: 0.88 }]}
         onPress={() => navigation.navigate('AddEditEntry', { bookId, entry: e, currency: currentBook?.currency })}
-        onLongPress={() => handleDelete(e)}
+        onLongPress={() => handleEntryLongPress(e)}
       >
         <View style={[s.entryIcon, { backgroundColor: isCashIn ? COLORS.cashInLight : COLORS.cashOutLight }]}>
           <Ionicons

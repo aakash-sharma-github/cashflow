@@ -29,7 +29,10 @@ ios/
 ios/
 
 # Development based md files
+google-play-key.json
 production.md
+distribution.md
+rls-security-analysis.md
 
 # Metro
 .metro-health-check*

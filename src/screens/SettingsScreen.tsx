@@ -15,6 +15,7 @@ import { useBooksStore } from '../store/booksStore'
 import { COLORS, SPACING, BORDER_RADIUS, FONT_SIZE, SHADOW } from '../constants'
 import { getInitials, getDisplayName } from '../utils'
 import type { BookMember } from '../types'
+import { APP_VERSION } from '../utils/version'
 
 export default function SettingsScreen({ navigation }: any) {
     const { user, signOut } = useAuthStore()
@@ -243,12 +244,14 @@ export default function SettingsScreen({ navigation }: any) {
                         iconBg="#EEF2FF"
                         iconColor={COLORS.primary}
                         label="About Us"
-                        sublabel="CashFlow v2.2.2"
-                        onPress={() => Alert.alert(
-                            'CashFlow',
-                            'Version 2.2.2\n\nA smart, collaborative expense tracker built for teams and individuals.\n\n© 2026 CashFlow. All rights reserved.',
-                            [{ text: 'OK' }]
-                        )}
+                        sublabel={`CashFlow v${APP_VERSION}`}
+                        onPress={() =>
+                            Alert.alert(
+                                'CashFlow',
+                                `Version ${APP_VERSION}\n\nA smart, collaborative expense tracker built for teams and individuals.\n\n© 2026 CashFlow. All rights reserved.`,
+                                [{ text: 'OK' }]
+                            )
+                        }
                     />
                 </View>
                 <Text style={{ fontSize: FONT_SIZE.xs, color: theme.textTertiary, marginTop: SPACING.sm, marginLeft: 4 }}>

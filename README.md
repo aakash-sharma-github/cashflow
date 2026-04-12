@@ -2,40 +2,45 @@
 
 > Smart, collaborative expense tracking for individuals and teams.
 
-A production-grade mobile app built with **React Native (Expo)** + **Supabase**. Track cash flow across multiple ledger books, collaborate with teammates in real time, and stay on top of every rupee — online or offline.
+A production-grade mobile app built with **React Native (Expo ~51)** + **Supabase**. Track cash flow across multiple ledger books, collaborate in real time, and stay on top of every transaction — online or offline.
 
 ---
 
 ## ✨ Features
 
 ### Core
-- 📧 **Magic Link + Google OAuth** — Sign in without a password
-- 📚 **Multiple Books** — Personal, Business, Family — keep everything separate
-- 💸 **Cash In / Cash Out** — Track every transaction with notes and a custom date/time picker
-- 📊 **Running Balance** — Always see your net position at a glance
-- 🎨 **Dark & Light Mode** — Persisted preference, applied app-wide
+- 📧 **Magic Link + Google OAuth** — passwordless sign-in
+- 📚 **Multiple Books** — Personal, Business, Family — independent ledgers
+- 💸 **Cash In / Cash Out** — entries with notes, custom date/time picker
+- 📊 **Running Balance** — always-visible net position
+- 🎨 **Dark & Light Mode** — system-aware, persisted preference
 
 ### Collaboration
-- 👥 **Invite by Email** — Add collaborators to any book
-- 🔔 **Push Notifications** — Get notified the moment someone invites you
-- ⚡ **Real-Time Sync** — All members see changes instantly via Supabase Realtime
-- 🔐 **Row Level Security** — Only members can access their books
+- 👥 **Invite by Email** — add collaborators to any book
+- 🔔 **Local Push Notifications** — instant alert when you receive an invite
+- ⚡ **Real-Time Sync** — all members see changes live via Supabase Realtime
+- 🔐 **Row Level Security** — users only access their own data
 
 ### Offline First
-- 📴 **Offline CRUD** — Create, edit, delete entries and books without internet
-- 🔄 **Auto Sync** — Queued changes upload automatically when connectivity returns
-- 💾 **Local Cache** — All data cached to AsyncStorage, readable offline
+- 📴 **Full Offline CRUD** — create, edit, delete without internet
+- 🔄 **Auto Sync** — queued operations replay on reconnect
+- 💾 **Local Cache** — all data readable offline via AsyncStorage
 
 ### Export & Import
-- 📊 **CSV Export** — Open in Excel, Google Sheets, Numbers
-- 📑 **PDF Export** — Branded report with summary + full transaction table
-- 📂 **CSV Import** — Bulk import entries from any CSV file with preview
+- 📊 **CSV Export** — open in Excel, Google Sheets, Numbers
+- 📑 **PDF Export** — branded report with summary + transaction table
+- 📗 **Excel Export (.xlsx)** — native Excel workbook with summary sheet
+- 📂 **CSV / Excel / XLSM Import** — bulk import with live preview
 
-### Settings
-- 👤 **Edit Profile** — Update your display name
-- 🔒 **Privacy Policy** — Full in-app privacy policy page
-- 📜 **Terms & Conditions** — Full in-app terms page
-- 👥 **Members View** — See all people you've invited across your books
+### Tasks
+- ✅ **Offline Todos** — full task manager, device-local, no server needed
+- 🎯 **Priority Levels** — High / Medium / Low with color coding
+- 🔍 **Search + Filter** — find and filter tasks instantly
+
+### Settings & Profile
+- 👤 **Edit Display Name** — update what collaborators see
+- 🔒 **Privacy Policy** — full in-app page
+- 📜 **Terms & Conditions** — full in-app page
 
 ---
 
@@ -44,15 +49,14 @@ A production-grade mobile app built with **React Native (Expo)** + **Supabase**.
 | Layer | Technology |
 |-------|-----------|
 | Mobile | React Native 0.74 (Expo ~51) |
-| Backend | Supabase (PostgreSQL + Auth + Realtime + Edge Functions) |
+| Backend | Supabase (PostgreSQL + Auth + Realtime) |
 | State | Zustand 4 |
 | Navigation | React Navigation v6 |
-| Auth | Supabase Magic Link + Google OAuth |
+| Auth | Magic Link OTP + Google OAuth |
 | Storage | Expo SecureStore (chunked) + AsyncStorage |
-| Push | Expo Notifications |
-| Export | expo-print + expo-sharing + expo-file-system |
-| Icons | @expo/vector-icons (Ionicons) |
-| Gradients | expo-linear-gradient |
+| Notifications | expo-notifications (local, no Firebase) |
+| Export | expo-print + expo-sharing + xlsx |
+| Version | expo-constants (reads from app.json) |
 
 ---
 
@@ -60,9 +64,9 @@ A production-grade mobile app built with **React Native (Expo)** + **Supabase**.
 
 ### Prerequisites
 - Node.js 18+
-- Expo CLI: `npm install -g expo-cli`
-- Physical device with Expo Go app (for push notifications)
-- Supabase account (free tier)
+- `npm install -g eas-cli`
+- Supabase account (free tier works)
+- Physical device with Expo Go (for testing)
 
 ### 1. Clone & Install
 ```bash
@@ -74,30 +78,28 @@ npm install
 ### 2. Configure Environment
 ```bash
 cp .env.example .env
-```
-Edit `.env`:
-```env
-EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-public-key
-EXPO_PUBLIC_EAS_PROJECT_ID=your-eas-project-id
+# Fill in:
+# EXPO_PUBLIC_SUPABASE_URL
+# EXPO_PUBLIC_SUPABASE_ANON_KEY
+# EXPO_PUBLIC_EAS_PROJECT_ID
 ```
 
-### 3. Run Database Migrations
-In Supabase SQL Editor, run **in order**:
+### 3. Run Supabase Migrations
+In Supabase SQL Editor, run in order:
 1. `supabase/migrations/001_schema.sql`
 2. `supabase/migrations/002_fix_rls.sql`
-3. `supabase/migrations/003_fix_rls_final.sql` ← **Required**
+3. `supabase/migrations/003_fix_rls_final.sql`
+4. `supabase/migrations/004_fix_rls_definitive.sql` ← **Required**
 
-### 4. Configure Supabase
-- **Auth → URL Configuration** → Add redirect: `cashflow://auth/callback`
-- **Auth → Providers** → Enable Google (add Client ID + Secret)
-- **Database → Replication** → Enable for: `entries`, `book_members`, `invitations`
+### 4. Configure Supabase Auth
+- Auth → URL Config → add `cashflow://auth/callback`
+- Auth → Providers → enable Google (Client ID + Secret)
 
-### 5. Run the App
+### 5. Start Dev Server
 ```bash
 npx expo start
+# Scan QR with Expo Go app
 ```
-Scan the QR code with Expo Go on your device.
 
 ---
 
@@ -105,84 +107,66 @@ Scan the QR code with Expo Go on your device.
 
 ```
 cashflow/
-├── App.tsx                         # Entry point
-├── assets/                         # Icons, splash, adaptive icon
+├── App.tsx                          # Boot: auth + theme + offline + push
+├── app.json                         # Single version source of truth
+├── eas.json                         # EAS build profiles (autoIncrement)
+├── scripts/
+│   └── bump-version.js              # npm run version:patch|minor|major
+├── assets/                          # icon, splash, adaptive-icon, notification-icon
 ├── src/
-│   ├── screens/
-│   │   ├── LoginScreen.tsx         # Magic link + Google OAuth
-│   │   ├── VerifyOtpScreen.tsx     # OTP entry
-│   │   ├── HomeScreen.tsx          # Books list + balance
-│   │   ├── BookDetailScreen.tsx    # Entries + filter + balance
-│   │   ├── AddEditEntryScreen.tsx  # Entry form + datetime picker
-│   │   ├── CreateBookScreen.tsx    # Book create/edit
-│   │   ├── MembersScreen.tsx       # Invite + member management
-│   │   ├── NotificationsScreen.tsx # Invitation inbox
-│   │   ├── ExportImportScreen.tsx  # CSV/PDF export + import
-│   │   ├── SettingsScreen.tsx      # Theme, profile, members, about
-│   │   ├── EditProfileScreen.tsx   # Name update
-│   │   ├── PrivacyPolicyScreen.tsx # Full privacy policy
-│   │   └── TermsScreen.tsx        # Full terms & conditions
-│   ├── services/
-│   │   ├── supabase.ts             # Chunked SecureStore client
-│   │   ├── authService.ts          # OTP + Google OAuth
-│   │   ├── booksService.ts         # Books CRUD
-│   │   ├── entriesService.ts       # Entries CRUD + paginated
-│   │   ├── invitationsService.ts   # Invites + members
-│   │   ├── localDb.ts              # AsyncStorage offline cache
-│   │   ├── syncService.ts          # Offline queue replay
-│   │   ├── exportService.ts        # CSV/PDF export + CSV import
-│   │   └── notificationService.ts  # Expo push notifications
-│   ├── store/
-│   │   ├── authStore.ts            # Session + user profile
-│   │   ├── booksStore.ts           # Books (offline-first)
-│   │   ├── entriesStore.ts         # Entries (offline-first)
-│   │   ├── offlineStore.ts         # Network state + op queue
-│   │   ├── inboxStore.ts           # Unread invitation count
-│   │   └── themeStore.ts           # Light/dark preference
-│   ├── hooks/
-│   │   ├── useEntriesRealtime.ts   # Supabase realtime entries
-│   │   ├── useOfflineSync.ts       # Auto-sync on reconnect
-│   │   └── usePushNotifications.ts # Device registration + listener
-│   ├── navigation/index.tsx        # Stack + tab navigators
+│   ├── screens/ (13 screens)
+│   ├── services/ (9 services)
+│   ├── store/ (7 Zustand stores)
+│   ├── hooks/ (3 hooks)
 │   ├── components/common/
-│   │   └── OfflineBanner.tsx       # Animated offline/sync indicator
-│   ├── types/index.ts
-│   ├── constants/index.ts          # Design tokens
-│   └── utils/index.ts
-├── supabase/
-│   ├── migrations/
-│   │   ├── 001_schema.sql
-│   │   ├── 002_fix_rls.sql
-│   │   └── 003_fix_rls_final.sql
-│   └── functions/
-│       └── send-invite/index.ts    # Resend email edge function
-└── production.md                   # Play Store + Expo publish guide
+│   │   ├── OfflineBanner.tsx
+│   │   └── ThemedAlert.tsx          # Themed dialogs + action sheets
+│   ├── navigation/index.tsx
+│   ├── utils/
+│   │   ├── index.ts
+│   │   └── version.ts               # Live version from expo-constants
+│   ├── constants/index.ts
+│   └── types/index.ts
+└── supabase/
+    ├── migrations/ (4 SQL files)
+    └── functions/send-invite/
 ```
+
+---
+
+## 🔢 Versioning
+
+Version is managed in `app.json` only — never hardcode it anywhere else.
+
+```bash
+npm run version:patch   # 1.0.0 → 1.0.1  (bug fixes)
+npm run version:minor   # 1.0.0 → 1.1.0  (new features)
+npm run version:major   # 1.0.0 → 2.0.0  (breaking changes)
+```
+
+`versionCode` (Android) is **auto-incremented by EAS** on each production build — you never touch it. The in-app version display reads from `expo-constants` at runtime.
 
 ---
 
 ## 🔐 Security
 
-- Row Level Security on all tables — users only access their own data
-- JWT tokens chunked across SecureStore keys to bypass 2KB limit
-- SECURITY DEFINER functions for invitation accept/reject
-- Trigger functions use `SET search_path = public, pg_temp`
+- Row Level Security on all tables (see migration 004 for the definitive fix)
+- JWT tokens chunked across SecureStore keys (>2KB limit bypass)
+- All trigger/helper functions owned by `postgres` (true superuser bypass)
+- Local notifications only — no Firebase/FCM required
 
 ---
 
-## 📦 New Packages (run `npm install`)
+## 📦 All Dependencies
 
-| Package | Purpose |
-|---------|---------|
-| `@react-native-community/datetimepicker` | Native date+time picker |
-| `expo-notifications` | Push notification infrastructure |
-| `expo-device` | Physical device detection |
+See `package.json`. Key additions beyond standard Expo:
+`@react-native-community/datetimepicker`, `expo-notifications`, `expo-device`, `expo-constants`, `expo-splash-screen`, `xlsx`
 
 ---
 
 ## 🗺️ Roadmap
 
-See `agents.md` for detailed future scope checkpoints.
+See `agents.md` for detailed future scope checkpoints (FP-01 through FP-12).
 
 ---
 

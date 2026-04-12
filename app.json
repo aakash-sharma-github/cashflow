@@ -2,7 +2,7 @@
   "expo": {
     "name": "CashFlow",
     "slug": "cashflow",
-    "version": "2.2.1",
+    "version": "3.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
