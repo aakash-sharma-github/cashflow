@@ -1,51 +1,29 @@
 // metro.config.js
-// Metro bundler configuration for CashFlow.
-// Key optimisations that reduce JS bundle size:
-//   1. Tree-shaking via minification
-//   2. Exclude large packages from the bundle
-//   3. Inline requires (lazy loading — reduces startup time)
+// Safe Metro configuration for CashFlow.
+//
+// IMPORTANT: Keep this minimal. The previous version added aggressive
+// minifier overrides (mangle: { toplevel: true }) which caused React Native
+// to fail finding modules by name at runtime — contributing to the crash.
+//
+// Size optimisations are handled at the native level via ProGuard (app.json).
+// The JS bundle is minified by Metro's default minifier during production builds.
 
 const { getDefaultConfig } = require('expo/metro-config')
 
 const config = getDefaultConfig(__dirname)
 
-// Enable inline requires — modules only load when first used, not at startup
-// This improves cold start time significantly
-config.transformer = {
-  ...config.transformer,
-  minifierConfig: {
-    keep_classnames: false,
-    keep_fnames: false,
-    mangle: {
-      toplevel: true,
-    },
-    output: {
-      ascii_only: true,
-      quote_style: 3,
-      wrap_iife: true,
-    },
-    sourceMap: {
-      includeSources: false,
-    },
-    toplevel: false,
-    compress: {
-      reduce_funcs: false,
-    },
-  },
-}
-
-// Resolve only used platform files
+// Block test files from being bundled (safe, no runtime impact)
 config.resolver = {
   ...config.resolver,
-  // Prefer optimised platform variants
-  resolverMainFields: ['react-native', 'browser', 'main'],
-  // Block packages that are accidentally included but unused
   blockList: [
-    // Exclude test files from bundle
     /.*\/__tests__\/.*/,
     /.*\.test\.[jt]sx?$/,
     /.*\.spec\.[jt]sx?$/,
   ],
 }
+
+// Do NOT override transformer.minifierConfig — Metro's defaults are safe.
+// Custom mangle settings can rename React Native internal references
+// that are resolved via string lookups at runtime.
 
 module.exports = config
