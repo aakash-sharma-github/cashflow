@@ -1,563 +1,382 @@
-// src/screens/BookDetailScreen.tsx
-import React, { useEffect, useCallback, useState } from "react";
+// src/screens/BookDetailScreen.tsx — Redesigned: minimal, date-grouped entries
+import React, { useEffect, useCallback, useState } from 'react'
 import {
-  View,
-  Text,
-  FlatList,
-  TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
-  RefreshControl,
-  Pressable,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
-import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "@react-navigation/native";
-import { useEntriesStore } from "../store/entriesStore";
-import { useBooksStore } from "../store/booksStore";
-import { useAuthStore } from "../store/authStore";
-import { useThemeStore, getTheme } from "../store/themeStore";
-import { useEntriesRealtime } from "../hooks/useEntriesRealtime";
-import {
-  COLORS,
-  SPACING,
-  BORDER_RADIUS,
-  FONT_SIZE,
-  SHADOW,
-} from "../constants";
-import {
-  themedAlert,
-  themedActionSheet,
-} from "../components/common/ThemedAlert";
-import { formatAmount, formatEntryDate } from "../utils";
-import type { Entry, EntryFilter } from "../types";
+  View, Text, FlatList, TouchableOpacity, StyleSheet,
+  ActivityIndicator, RefreshControl, Pressable, SectionList,
+} from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
+import { Ionicons } from '@expo/vector-icons'
+import { useFocusEffect } from '@react-navigation/native'
+import { useEntriesStore } from '../store/entriesStore'
+import { useBooksStore } from '../store/booksStore'
+import { useAuthStore } from '../store/authStore'
+import { useThemeStore, getTheme } from '../store/themeStore'
+import { useEntriesRealtime } from '../hooks/useEntriesRealtime'
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '../constants'
+import { themedAlert, themedActionSheet } from '../components/common/ThemedAlert'
+import { formatAmount } from '../utils'
+import { format, isToday, isYesterday } from 'date-fns'
+import type { Entry, EntryFilter } from '../types'
 
-const FILTERS: { key: EntryFilter; label: string; icon: string }[] = [
-  { key: "all", label: "All", icon: "list-outline" },
-  { key: "cash_in", label: "In", icon: "arrow-down-outline" },
-  { key: "cash_out", label: "Out", icon: "arrow-up-outline" },
-];
+// ── Group entries by date ────────────────────────────────────
+function groupByDate(entries: Entry[]) {
+  const groups: Record<string, Entry[]> = {}
+  for (const e of entries) {
+    const key = format(new Date(e.entry_date), 'yyyy-MM-dd')
+    if (!groups[key]) groups[key] = []
+    groups[key].push(e)
+  }
+  return Object.keys(groups)
+    .sort((a, b) => b.localeCompare(a))
+    .map(key => ({ title: key, data: groups[key] }))
+}
+
+function formatSectionTitle(dateStr: string): string {
+  const d = new Date(dateStr)
+  if (isToday(d)) return `Today, ${format(d, 'dd MMMM yyyy')}`
+  if (isYesterday(d)) return `Yesterday, ${format(d, 'dd MMMM yyyy')}`
+  return format(d, 'dd MMMM yyyy')
+}
+
+const FILTERS: { key: EntryFilter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'cash_in', label: 'Cash In' },
+  { key: 'cash_out', label: 'Cash Out' },
+]
 
 export default function BookDetailScreen({ route, navigation }: any) {
-  const { bookId } = route.params;
-  const [refreshing, setRefreshing] = useState(false);
+  const { bookId } = route.params
+  const [refreshing, setRefreshing] = useState(false)
 
-  const {
-    entries,
-    isLoading,
-    isLoadingMore,
-    filter,
-    summary,
-    fetchEntries,
-    loadMore,
-    deleteEntry,
-    setFilter,
-  } = useEntriesStore();
-  const { currentBook, fetchBook } = useBooksStore();
-  const { user } = useAuthStore();
-  const { mode } = useThemeStore();
-  const theme = getTheme(mode);
+  const { entries, isLoading, filter, summary, fetchEntries, deleteEntry, setFilter } = useEntriesStore()
+  const { currentBook, fetchBook } = useBooksStore()
+  const { user } = useAuthStore()
+  const { mode } = useThemeStore()
+  const theme = getTheme(mode)
 
-  useEntriesRealtime(bookId);
+  useEntriesRealtime(bookId)
 
-  useFocusEffect(
-    useCallback(() => {
-      fetchEntries(bookId);
-      fetchBook(bookId);
-    }, [bookId]),
-  );
+  useFocusEffect(useCallback(() => {
+    fetchEntries(bookId)
+    fetchBook(bookId)
+  }, [bookId]))
 
   useEffect(() => {
     navigation.setOptions({
-      title: currentBook?.name || "Book",
+      title: '',
+      headerLeft: () => (
+        <TouchableOpacity onPress={() => navigation.goBack()} style={{ padding: 4, marginLeft: 4 }}>
+          <Ionicons name="arrow-back" size={24} color={theme.text} />
+        </TouchableOpacity>
+      ),
+      headerTitle: () => (
+        <View>
+          <Text style={{ fontSize: FONT_SIZE.md, fontWeight: '700', color: theme.text }}>
+            {currentBook?.name || 'Book'}
+          </Text>
+          {currentBook && (
+            <Text style={{ fontSize: FONT_SIZE.xs, color: theme.textTertiary }}>
+              {/* Show member names if available */}
+              {currentBook.currency}
+            </Text>
+          )}
+        </View>
+      ),
       headerRight: () => (
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 6,
-            marginRight: 12,
-          }}
-        >
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginRight: 8 }}>
           <TouchableOpacity
-            style={[s.hdrBtn, { backgroundColor: COLORS.primaryLight }]}
-            onPress={() =>
-              navigation.navigate("ExportImport", {
-                bookId,
-                bookName: currentBook?.name,
-              })
-            }
+            style={{ padding: 6 }}
+            onPress={() => navigation.navigate('ExportImport', { bookId, bookName: currentBook?.name })}
           >
-            <Ionicons
-              name="download-outline"
-              size={18}
-              color={COLORS.primary}
-            />
+            <Ionicons name="document-text-outline" size={22} color={theme.text} />
           </TouchableOpacity>
           <TouchableOpacity
-            style={[s.hdrBtn, { backgroundColor: COLORS.primaryLight }]}
-            onPress={() =>
-              navigation.navigate("Members", {
-                bookId,
-                bookName: currentBook?.name,
-              })
-            }
+            style={{ padding: 6 }}
+            onPress={() => navigation.navigate('Members', { bookId, bookName: currentBook?.name })}
           >
-            <Ionicons name="people-outline" size={18} color={COLORS.primary} />
+            <Ionicons name="ellipsis-vertical" size={22} color={theme.text} />
           </TouchableOpacity>
         </View>
       ),
-    });
-  }, [currentBook]);
+    })
+  }, [currentBook, theme])
 
   const onRefresh = async () => {
-    setRefreshing(true);
-    await Promise.all([fetchEntries(bookId), fetchBook(bookId)]);
-    setRefreshing(false);
-  };
+    setRefreshing(true)
+    await Promise.all([fetchEntries(bookId), fetchBook(bookId)])
+    setRefreshing(false)
+  }
 
-  const handleEntryLongPress = (e: Entry) => {
-    const isCashIn = e.type === "cash_in";
-    const label = `${isCashIn ? "+ " : "- "}${formatAmount(e.amount, currentBook?.currency)}`;
-    themedActionSheet(label, e.note || (isCashIn ? "Cash In" : "Cash Out"), [
-      {
-        text: "Edit Entry",
-        onPress: () =>
-          navigation.navigate("AddEditEntry", {
-            bookId,
-            entry: e,
-            currency: currentBook?.currency,
+  const handleEntryThreeDot = (e: Entry) => {
+    const isCashIn = e.type === 'cash_in'
+    themedActionSheet(
+      e.note || (isCashIn ? 'Cash In' : 'Cash Out'),
+      formatAmount(e.amount, currentBook?.currency),
+      [
+        {
+          text: 'Edit Entry',
+          onPress: () => navigation.navigate('AddEditEntry', {
+            bookId, entry: e, currency: currentBook?.currency,
           }),
-      },
-      {
-        text: "Delete Entry",
-        style: "destructive" as const,
-        onPress: () =>
-          themedAlert(
-            "Delete Entry",
-            `Remove ${label}${e.note ? ` "${e.note}"` : ""}? This cannot be undone.`,
+        },
+        {
+          text: 'Delete Entry',
+          style: 'destructive' as const,
+          onPress: () => themedAlert(
+            'Delete Entry',
+            `Remove ${formatAmount(e.amount, currentBook?.currency)}${e.note ? ` "${e.note}"` : ''}?`,
             [
-              { text: "Cancel", style: "cancel" },
+              { text: 'Cancel', style: 'cancel' },
               {
-                text: "Delete",
-                style: "destructive",
+                text: 'Delete', style: 'destructive',
                 onPress: async () => {
-                  const { error } = await deleteEntry(e.id, bookId);
-                  if (error) themedAlert("Error", error);
+                  const { error } = await deleteEntry(e.id, bookId)
+                  if (error) themedAlert('Error', error)
                 },
               },
             ],
-            "trash-outline",
+            'trash-outline',
           ),
-      },
-      { text: "Cancel", style: "cancel" as const },
-    ]);
-  };
+        },
+        { text: 'Cancel', style: 'cancel' as const },
+      ]
+    )
+  }
+
+  const bal = summary?.balance ?? 0
+  const sections = groupByDate(entries)
 
   const renderEntry = ({ item: e }: { item: Entry }) => {
-    const isCashIn = e.type === "cash_in";
-    const isMe = e.user_id === user?.id;
-    const entryBy = e.profile?.full_name || e.profile?.email;
+    const isCashIn = e.type === 'cash_in'
+    const isMe = e.user_id === user?.id
+    const entryBy = e.profile?.full_name || e.profile?.email
+    const timeStr = format(new Date(e.entry_date), 'h:mm a')
+
     return (
       <Pressable
-        style={({ pressed }) => [
-          s.entryCard,
-          { backgroundColor: theme.surface },
-          pressed && { opacity: 0.88 },
-        ]}
-        onPress={() =>
-          navigation.navigate("AddEditEntry", {
-            bookId,
-            entry: e,
-            currency: currentBook?.currency,
-          })
-        }
-        onLongPress={() => handleEntryLongPress(e)}
+        style={({ pressed }) => [s.entryRow, { backgroundColor: theme.surface }, pressed && { opacity: 0.85 }]}
+        onPress={() => navigation.navigate('AddEditEntry', { bookId, entry: e, currency: currentBook?.currency })}
       >
-        {/* Type icon */}
-        <View
-          style={[
-            s.entryIcon,
-            {
-              backgroundColor: isCashIn
-                ? COLORS.cashInLight
-                : COLORS.cashOutLight,
-            },
-          ]}
-        >
-          <Ionicons
-            name={isCashIn ? "arrow-down" : "arrow-up"}
-            size={18}
-            color={isCashIn ? COLORS.cashIn : COLORS.cashOut}
-          />
+        {/* Type badge */}
+        <View style={[
+          s.typeBadge,
+          { backgroundColor: isCashIn ? '#1a2e1a' : '#2e1a1a' },
+        ]}>
+          <Text style={[s.typeBadgeText, { color: isCashIn ? COLORS.cashIn : COLORS.cashOut }]}>
+            {isCashIn ? 'Cash' : 'Cash'}
+          </Text>
         </View>
 
-        {/* Middle: note + meta row */}
-        <View style={s.entryMid}>
-          {/* Note */}
-          <Text style={[s.entryNote, { color: theme.text }]} numberOfLines={1}>
-            {e.note || (isCashIn ? "Cash In" : "Cash Out")}
-          </Text>
-          {/* Date & time + Entry by */}
-          <View style={s.entryMetaRow}>
-            <Ionicons
-              name="time-outline"
-              size={11}
-              color={theme.textTertiary}
-            />
-            <Text style={[s.entryMeta, { color: theme.textTertiary }]}>
-              {" "}
-              {formatEntryDate(e.entry_date)}
+        {/* Content */}
+        <View style={s.entryContent}>
+          {/* Amount + balance row */}
+          <View style={s.entryTopRow}>
+            <Text style={[s.entryAmt, { color: isCashIn ? COLORS.cashIn : COLORS.cashOut }]}>
+              {isCashIn ? '+' : ''}{formatAmount(e.amount, currentBook?.currency)}
             </Text>
+            {e.running_balance !== undefined && (
+              <Text style={[s.entryRunBal, { color: theme.textTertiary }]}>
+                Balance: {formatAmount(e.running_balance, currentBook?.currency)}
+              </Text>
+            )}
+          </View>
+          {/* Remark */}
+          {e.note ? (
+            <Text style={[s.entryNote, { color: theme.text }]} numberOfLines={1}>
+              {e.note}
+            </Text>
+          ) : null}
+          {/* Entry by + time */}
+          <View style={s.entryMeta}>
             {!isMe && entryBy ? (
-              <>
-                <Text style={[s.entryMetaDot, { color: theme.textTertiary }]}>
-                  {" "}
-                  ·{" "}
-                </Text>
-                <Ionicons
-                  name="person-outline"
-                  size={11}
-                  color={theme.textTertiary}
-                />
-                <Text
-                  style={[s.entryMeta, { color: theme.textTertiary }]}
-                  numberOfLines={1}
-                >
-                  {" "}
-                  {entryBy}
-                </Text>
-              </>
+              <Text style={[s.entryByText, { color: COLORS.primary }]}>
+                Entry by {entryBy}{'  '}
+              </Text>
             ) : null}
+            <Text style={[s.entryTime, { color: theme.textTertiary }]}>
+              {isMe ? `at ${timeStr}` : `at ${timeStr}`}
+            </Text>
           </View>
         </View>
 
-        {/* Amount */}
-        <Text
-          style={[
-            s.entryAmt,
-            { color: isCashIn ? COLORS.cashIn : COLORS.cashOut },
-          ]}
+        {/* Three-dot */}
+        <TouchableOpacity
+          onPress={() => handleEntryThreeDot(e)}
+          style={s.dotBtn}
+          hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
         >
-          {isCashIn ? "+" : "-"}
-          {formatAmount(e.amount, currentBook?.currency)}
-        </Text>
+          <Ionicons name="ellipsis-vertical" size={16} color={theme.textTertiary} />
+        </TouchableOpacity>
       </Pressable>
-    );
-  };
+    )
+  }
 
-  const bal = summary?.balance ?? 0;
-  const pos = bal >= 0;
+  const renderSectionHeader = ({ section }: any) => (
+    <View style={[s.sectionHeader, { backgroundColor: theme.background }]}>
+      <Text style={[s.sectionHeaderText, { color: theme.textTertiary }]}>
+        {formatSectionTitle(section.title)}
+      </Text>
+    </View>
+  )
 
-  const ListHeader = () => (
-    <View>
-      {/* Summary card */}
-      <LinearGradient
-        colors={pos ? ["#00C48C", "#00A374"] : ["#FF647C", "#E84560"]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={s.summaryCard}
-      >
-        <View style={s.sumDeco1} />
-        <View style={s.sumDeco2} />
-        <Text style={s.sumLabel}>Net Balance</Text>
-        <Text style={s.sumBalance}>
-          {formatAmount(Math.abs(bal), currentBook?.currency)}
-        </Text>
-        {/* <Text style={s.sumSub}>
-          {pos ? "You're in the green 🎉" : "You're in the red ⚠️"}
-        </Text> */}
-        <View style={s.sumRow}>
-          <View style={s.sumItem}>
-            <Ionicons
-              name="arrow-down"
-              size={14}
-              color="rgba(255,255,255,0.8)"
-            />
-            {/* <Text style={s.sumItemLabel}> Cash In</Text> */}
-            <Text style={s.sumItemVal}>
+  return (
+    <SafeAreaView style={[s.container, { backgroundColor: theme.background }]} edges={['bottom']}>
+      {/* Balance panel */}
+      <View style={[s.balancePanel, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
+        <View style={s.balancePanelRow}>
+          <View style={s.balancePanelItem}>
+            <Text style={[s.balancePanelLabel, { color: theme.textSecondary }]}>Net Balance</Text>
+            <Text style={[s.balancePanelVal, {
+              color: bal >= 0 ? COLORS.cashIn : COLORS.cashOut,
+            }]}>
+              {bal >= 0 ? '' : '-'}{formatAmount(Math.abs(bal), currentBook?.currency)}
+            </Text>
+          </View>
+        </View>
+        <View style={[s.balanceDivider, { backgroundColor: theme.border }]} />
+        <View style={s.balanceSubRow}>
+          <View style={s.balanceSubItem}>
+            <Text style={[s.balanceSubLabel, { color: theme.textSecondary }]}>Total In (+)</Text>
+            <Text style={[s.balanceSubVal, { color: COLORS.cashIn }]}>
               {formatAmount(summary?.cash_in || 0, currentBook?.currency)}
             </Text>
           </View>
-          <View style={s.sumDiv} />
-          <View style={s.sumItem}>
-            <Ionicons name="arrow-up" size={14} color="rgba(255,255,255,0.8)" />
-            {/* <Text style={s.sumItemLabel}> Cash Out</Text> */}
-            <Text style={s.sumItemVal}>
+          <View style={s.balanceSubItem}>
+            <Text style={[s.balanceSubLabel, { color: theme.textSecondary }]}>Total Out (-)</Text>
+            <Text style={[s.balanceSubVal, { color: COLORS.cashOut }]}>
               {formatAmount(summary?.cash_out || 0, currentBook?.currency)}
             </Text>
           </View>
         </View>
-      </LinearGradient>
-
-      {/* Filters */}
-      <View style={s.filterRow}>
-        {FILTERS.map((f) => {
-          const active = filter === f.key;
-          return (
-            <TouchableOpacity
-              key={f.key}
-              style={[
-                s.filterTab,
-                { backgroundColor: theme.surface, borderColor: theme.border },
-                active && {
-                  backgroundColor: COLORS.primary,
-                  borderColor: COLORS.primary,
-                },
-              ]}
-              onPress={() => setFilter(f.key, bookId)}
-              activeOpacity={0.75}
-            >
-              <Ionicons
-                name={f.icon as any}
-                size={14}
-                color={active ? "#fff" : theme.textSecondary}
-              />
-              <Text
-                style={[
-                  s.filterLabel,
-                  { color: active ? "#fff" : theme.textSecondary },
-                ]}
-              >
-                {f.label}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
       </View>
 
-      {entries.length > 0 && (
-        <Text style={[s.sectionTitle, { color: theme.textTertiary }]}>
-          Transactions
+      {/* Filter tabs */}
+      <View style={[s.filterRow, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
+        {FILTERS.map(f => (
+          <TouchableOpacity
+            key={f.key}
+            style={[
+              s.filterTab,
+              filter === f.key && { borderBottomColor: COLORS.primary, borderBottomWidth: 2 },
+            ]}
+            onPress={() => setFilter(f.key, bookId)}
+          >
+            <Text style={[
+              s.filterTabText,
+              { color: filter === f.key ? COLORS.primary : theme.textSecondary },
+              filter === f.key && { fontWeight: '700' },
+            ]}>
+              {f.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+        <Text style={[s.entryCount, { color: theme.textTertiary }]}>
+          Showing {entries.length} entries
         </Text>
-      )}
-    </View>
-  );
+      </View>
 
-  return (
-    <SafeAreaView
-      style={[s.container, { backgroundColor: theme.background }]}
-      edges={["bottom"]}
-    >
+      {/* Entry list */}
       {isLoading && entries.length === 0 ? (
-        <View style={s.loader}>
-          <ActivityIndicator size="large" color={COLORS.primary} />
-        </View>
+        <View style={s.loader}><ActivityIndicator color={COLORS.primary} /></View>
       ) : (
-        <FlatList
-          data={entries}
-          keyExtractor={(e) => e.id}
+        <SectionList
+          sections={sections}
+          keyExtractor={e => e.id}
           renderItem={renderEntry}
-          ListHeaderComponent={<ListHeader />}
+          renderSectionHeader={renderSectionHeader}
+          contentContainerStyle={s.list}
+          showsVerticalScrollIndicator={false}
+          stickySectionHeadersEnabled
           ListEmptyComponent={
             <View style={s.empty}>
-              <Ionicons
-                name="receipt-outline"
-                size={48}
-                color={theme.textTertiary}
-              />
-              <Text style={[s.emptyTitle, { color: theme.text }]}>
-                No transactions yet
-              </Text>
-              <Text style={[s.emptySub, { color: theme.textSecondary }]}>
+              <Ionicons name="receipt-outline" size={44} color={theme.textTertiary} />
+              <Text style={[s.emptyTitle, { color: theme.text }]}>No entries yet</Text>
+              <Text style={[s.emptyBody, { color: theme.textSecondary }]}>
                 Tap + to add your first entry
               </Text>
             </View>
           }
-          ListFooterComponent={
-            isLoadingMore ? (
-              <ActivityIndicator
-                style={{ padding: 20 }}
-                color={COLORS.primary}
-              />
-            ) : null
-          }
-          contentContainerStyle={s.list}
-          showsVerticalScrollIndicator={false}
-          onEndReached={() => loadMore(bookId)}
-          onEndReachedThreshold={0.3}
           refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor={COLORS.primary}
-            />
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />
           }
         />
       )}
 
+      {/* Single + FAB */}
       <TouchableOpacity
-        style={s.fab}
-        onPress={() =>
-          navigation.navigate("AddEditEntry", {
-            bookId,
-            currency: currentBook?.currency,
-          })
-        }
-        activeOpacity={0.9}
+        style={[s.fab, { backgroundColor: COLORS.primary }]}
+        onPress={() => navigation.navigate('AddEditEntry', { bookId, currency: currentBook?.currency })}
+        activeOpacity={0.88}
       >
-        <LinearGradient colors={["#5B5FED", "#7C3AED"]} style={s.fabGrad}>
-          <Ionicons name="add" size={28} color="#fff" />
-        </LinearGradient>
+        <Ionicons name="add" size={30} color="#fff" />
       </TouchableOpacity>
     </SafeAreaView>
-  );
+  )
 }
 
 const s = StyleSheet.create({
   container: { flex: 1 },
-  loader: { flex: 1, alignItems: "center", justifyContent: "center" },
-  list: { paddingBottom: 110 },
-  hdrBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  loader: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 40 },
+  list: { paddingBottom: 100 },
 
-  summaryCard: {
-    margin: SPACING.lg,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.xl,
-    overflow: "hidden",
-    ...SHADOW.lg,
-  },
-  sumDeco1: {
-    position: "absolute",
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: "rgba(255,255,255,0.08)",
-    top: -50,
-    right: -30,
-  },
-  sumDeco2: {
-    position: "absolute",
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    bottom: -20,
-    right: 80,
-  },
-  sumLabel: {
-    fontSize: FONT_SIZE.sm,
-    color: "rgba(255,255,255,0.8)",
-    fontWeight: "600",
-    marginBottom: 4,
-  },
-  sumBalance: {
-    fontSize: 38,
-    fontWeight: "900",
-    color: "#fff",
-    letterSpacing: -1,
-    marginBottom: 4,
-  },
-  sumSub: {
-    fontSize: FONT_SIZE.xs,
-    color: "rgba(255,255,255,0.7)",
-    marginBottom: SPACING.lg,
-  },
-  sumRow: {
-    flexDirection: "row",
-    backgroundColor: "rgba(0,0,0,0.12)",
-    borderRadius: 14,
-    padding: SPACING.md,
-  },
-  sumItem: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "wrap",
-  },
-  sumItemLabel: {
-    fontSize: FONT_SIZE.xs,
-    color: "rgba(255,255,255,0.75)",
-    flex: 1,
-  },
-  sumItemVal: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: "700",
-    color: "#fff",
-    marginTop: 2,
-  },
-  sumDiv: {
-    width: 1,
-    backgroundColor: "rgba(255,255,255,0.25)",
-    marginHorizontal: SPACING.md,
-  },
+  // Balance panel
+  balancePanel: { padding: SPACING.lg, borderBottomWidth: StyleSheet.hairlineWidth },
+  balancePanelRow: { marginBottom: SPACING.md },
+  balancePanelItem: {},
+  balancePanelLabel: { fontSize: FONT_SIZE.sm, marginBottom: 4 },
+  balancePanelVal: { fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
+  balanceDivider: { height: StyleSheet.hairlineWidth, marginBottom: SPACING.md },
+  balanceSubRow: { flexDirection: 'row' },
+  balanceSubItem: { flex: 1 },
+  balanceSubLabel: { fontSize: FONT_SIZE.xs, marginBottom: 2 },
+  balanceSubVal: { fontSize: FONT_SIZE.md, fontWeight: '700' },
 
+  // Filter row
   filterRow: {
-    flexDirection: "row",
+    flexDirection: 'row', alignItems: 'center',
+    borderBottomWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: SPACING.lg,
-    gap: SPACING.sm,
-    marginBottom: SPACING.md,
   },
-  filterTab: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: 8,
-    borderRadius: BORDER_RADIUS.full,
-    borderWidth: 1.5,
-  },
-  filterLabel: { fontSize: FONT_SIZE.sm, fontWeight: "600" },
-  sectionTitle: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: "700",
-    paddingHorizontal: SPACING.lg,
-    marginBottom: SPACING.sm,
-    textTransform: "uppercase",
-    letterSpacing: 1,
-  },
+  filterTab: { paddingVertical: SPACING.sm, marginRight: SPACING.lg },
+  filterTabText: { fontSize: FONT_SIZE.sm },
+  entryCount: { marginLeft: 'auto', fontSize: FONT_SIZE.xs },
 
-  entryCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginHorizontal: SPACING.lg,
-    marginBottom: 8,
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md,
-    ...SHADOW.sm,
-  },
-  entryIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: SPACING.md,
-  },
-  entryMid: { flex: 1 },
-  entryNote: { fontSize: FONT_SIZE.md, fontWeight: "600", marginBottom: 3 },
-  entryMetaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "wrap",
-  },
-  entryMeta: { fontSize: FONT_SIZE.xs },
-  entryMetaDot: { fontSize: FONT_SIZE.xs },
-  entryAmt: { fontSize: FONT_SIZE.md, fontWeight: "800" },
+  // Section header
+  sectionHeader: { paddingHorizontal: SPACING.lg, paddingVertical: 6 },
+  sectionHeaderText: { fontSize: FONT_SIZE.xs, fontWeight: '600' },
 
-  empty: { alignItems: "center", paddingTop: SPACING["2xl"], gap: SPACING.sm },
-  emptyTitle: { fontSize: FONT_SIZE.lg, fontWeight: "700" },
-  emptySub: { fontSize: FONT_SIZE.sm },
+  // Entry row
+  entryRow: {
+    flexDirection: 'row', alignItems: 'flex-start',
+    paddingHorizontal: SPACING.lg, paddingVertical: SPACING.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  typeBadge: {
+    paddingHorizontal: 8, paddingVertical: 4,
+    borderRadius: BORDER_RADIUS.sm, marginRight: SPACING.sm, marginTop: 2,
+  },
+  typeBadgeText: { fontSize: 11, fontWeight: '700' },
+  entryContent: { flex: 1 },
+  entryTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 2 },
+  entryAmt: { fontSize: FONT_SIZE.lg, fontWeight: '700' },
+  entryRunBal: { fontSize: FONT_SIZE.xs },
+  entryNote: { fontSize: FONT_SIZE.sm, marginBottom: 3 },
+  entryMeta: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
+  entryByText: { fontSize: FONT_SIZE.xs, fontWeight: '600' },
+  entryTime: { fontSize: FONT_SIZE.xs },
+  dotBtn: { padding: 4, paddingLeft: SPACING.sm, marginTop: 2 },
 
+  // Empty
+  empty: { alignItems: 'center', paddingTop: 60, gap: SPACING.sm },
+  emptyTitle: { fontSize: FONT_SIZE.lg, fontWeight: '700' },
+  emptyBody: { fontSize: FONT_SIZE.sm },
+
+  // FAB
   fab: {
-    position: "absolute",
-    bottom: SPACING.xl,
-    right: SPACING.lg,
-    borderRadius: 30,
-    overflow: "hidden",
-    ...SHADOW.lg,
+    position: 'absolute', bottom: SPACING.xl, right: SPACING.lg,
+    width: 56, height: 56, borderRadius: 28,
+    alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#5B5FED', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4, shadowRadius: 8, elevation: 8,
   },
-  fabGrad: {
-    width: 58,
-    height: 58,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-});
+})

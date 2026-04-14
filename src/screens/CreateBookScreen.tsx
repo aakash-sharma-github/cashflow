@@ -1,389 +1,213 @@
-// src/screens/CreateBookScreen.tsx
-// Dark mode fix: presentation:'modal' on Android uses a separate window surface
-// whose background is controlled by the Android theme (white), not React props.
-// contentStyle only works on iOS modals. Fix: use Platform to switch presentation,
-// and add backgroundColor to every container + ScrollView contentContainerStyle.
-import React, { useState } from "react";
+// src/screens/CreateBookScreen.tsx — Redesigned: minimal, just a name field
+// Removed: color picker, description, live preview card — all too bulky
+import React, { useState } from 'react'
 import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  ActivityIndicator,
-  Platform,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
-import { Ionicons } from "@expo/vector-icons";
-import { useBooksStore } from "../store/booksStore";
-import { useThemeStore, getTheme } from "../store/themeStore";
-import { themedAlert } from "../components/common/ThemedAlert";
-import {
-  COLORS,
-  SPACING,
-  BORDER_RADIUS,
-  FONT_SIZE,
-  SHADOW,
-  BOOK_COLORS,
-  CURRENCIES,
-} from "../constants";
+  View, Text, TextInput, TouchableOpacity, StyleSheet,
+  ScrollView, ActivityIndicator, Platform,
+} from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
+import { Ionicons } from '@expo/vector-icons'
+import { useBooksStore } from '../store/booksStore'
+import { useThemeStore, getTheme } from '../store/themeStore'
+import { themedAlert } from '../components/common/ThemedAlert'
+import { COLORS, SPACING, BORDER_RADIUS, FONT_SIZE, CURRENCIES } from '../constants'
+
+// Book name suggestions (like CashBook)
+const SUGGESTIONS = [
+  'Personal Expenses', 'Business Expenses', 'Shop Expenses',
+  'Home Expenses', 'Travel Expenses', 'Project Book',
+  'Purchase Order', 'Client Record', 'Petty Cash',
+]
 
 export default function CreateBookScreen({ navigation, route }: any) {
-  const editBook = route.params?.book;
-  const isEditing = !!editBook;
+  const editBook = route.params?.book
+  const isEditing = !!editBook
 
-  const [name, setName] = useState(editBook?.name || "");
-  const [nameFocused, setNameFocused] = useState(false);
-  const [descFocused, setDescFocused] = useState(false);
-  const [description, setDescription] = useState(editBook?.description || "");
-  const [color, setColor] = useState(editBook?.color || BOOK_COLORS[0]);
-  const [currency, setCurrency] = useState(editBook?.currency || "USD");
-  const [loading, setLoading] = useState(false);
+  const [name, setName] = useState(editBook?.name || '')
+  const [currency, setCurrency] = useState(editBook?.currency || 'USD')
+  const [loading, setLoading] = useState(false)
+  const [focused, setFocused] = useState(false)
 
-  const { createBook, updateBook } = useBooksStore();
-  const { mode } = useThemeStore();
-  const theme = getTheme(mode);
+  const { createBook, updateBook } = useBooksStore()
+  const { mode } = useThemeStore()
+  const theme = getTheme(mode)
+  const bg = theme.background
 
   const handleSave = async () => {
-    if (!name.trim()) {
-      themedAlert("Required", "Please enter a book name.");
-      return;
-    }
-    setLoading(true);
-    const formData = { name, description, color, currency };
+    if (!name.trim()) { themedAlert('Required', 'Please enter a book name.'); return }
+    setLoading(true)
+    const formData = { name: name.trim(), description: '', color: '#5B5FED', currency }
     const { error } = isEditing
       ? await updateBook(editBook.id, formData)
-      : await createBook(formData);
-    setLoading(false);
-    if (error) {
-      themedAlert("Error", error);
-      return;
-    }
-    navigation.goBack();
-  };
+      : await createBook(formData)
+    setLoading(false)
+    if (error) { themedAlert('Error', error); return }
+    navigation.goBack()
+  }
 
-  const currencySymbol =
-    CURRENCIES.find((c) => c.code === currency)?.symbol || currency;
-  const bg = theme.background;
+  // Filter suggestions based on input
+  const filteredSuggestions = name.length > 0
+    ? SUGGESTIONS.filter(s => s.toLowerCase().includes(name.toLowerCase()) && s !== name)
+    : SUGGESTIONS
 
   return (
-    // CRITICAL: wrap everything in a View with backgroundColor BEFORE SafeAreaView
-    // This fills the Android window surface gap that SafeAreaView can't reach
     <View style={{ flex: 1, backgroundColor: bg }}>
-      <SafeAreaView
-        style={[s.safe, { backgroundColor: bg }]}
-        edges={["bottom"]}
-      >
+      <SafeAreaView style={[s.safe, { backgroundColor: bg }]} edges={['bottom']}>
+        {/* Header */}
+        <View style={[s.header, { borderBottomColor: theme.border }]}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={s.closeBtn}>
+            <Ionicons name="close" size={24} color={theme.text} />
+          </TouchableOpacity>
+          <Text style={[s.headerTitle, { color: theme.text }]}>
+            {isEditing ? 'Edit Book' : 'Add New Book'}
+          </Text>
+          <View style={{ width: 32 }} />
+        </View>
+
         <ScrollView
-          // contentContainerStyle background fills bounce area on iOS & body on Android
-          contentContainerStyle={[s.scroll, { backgroundColor: bg }]}
           style={{ backgroundColor: bg }}
-          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[s.scroll, { backgroundColor: bg }]}
           keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
-          {/* Live preview card */}
-          <LinearGradient
-            colors={[color, color + "CC"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={s.preview}
-          >
-            <View style={s.previewDeco} />
-            <View style={s.previewIconWrap}>
-              <Ionicons name="book-outline" size={22} color="#fff" />
-            </View>
-            <Text style={s.previewName} numberOfLines={1}>
-              {name || "Book Name"}
-            </Text>
-            {description ? (
-              <Text style={s.previewDesc} numberOfLines={1}>
-                {description}
-              </Text>
-            ) : null}
-            <Text style={s.previewBalance}>{currencySymbol}0.00</Text>
-          </LinearGradient>
-
-          {/* Name */}
-          <View style={s.section}>
-            <Text style={[s.label, { color: theme.textSecondary }]}>
-              Book Name *
-            </Text>
-            <View
-              style={[
-                s.inputWrap,
-                { backgroundColor: theme.surface, borderColor: theme.border },
-                nameFocused && {
-                  borderColor: COLORS.primary,
-                  backgroundColor: COLORS.primaryLight,
-                },
-              ]}
-            >
-              <Ionicons
-                name="text-outline"
-                size={17}
-                color={nameFocused ? COLORS.primary : theme.textTertiary}
-                style={{ marginRight: 10 }}
-              />
-              <TextInput
-                style={[s.input, { color: theme.text }]}
-                value={name}
-                onChangeText={setName}
-                placeholder="e.g. Personal, Business..."
-                placeholderTextColor={theme.textTertiary}
-                maxLength={50}
-                autoFocus
-                onFocus={() => setNameFocused(true)}
-                onBlur={() => setNameFocused(false)}
-              />
-            </View>
+          {/* Book name input */}
+          <Text style={[s.fieldLabel, { color: theme.textSecondary }]}>Enter Book Name</Text>
+          <View style={[
+            s.inputWrap,
+            { borderColor: focused ? COLORS.primary : theme.border, backgroundColor: theme.surface },
+          ]}>
+            <TextInput
+              style={[s.input, { color: theme.text }]}
+              value={name}
+              onChangeText={setName}
+              placeholder="e.g. Shop Expenses"
+              placeholderTextColor={theme.textTertiary}
+              autoFocus
+              maxLength={50}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              returnKeyType="done"
+              onSubmitEditing={handleSave}
+            />
           </View>
 
-          {/* Description */}
-          <View style={s.section}>
-            <Text style={[s.label, { color: theme.textSecondary }]}>
-              Description (optional)
-            </Text>
-            <View
-              style={[
-                s.inputWrap,
-                { backgroundColor: theme.surface, borderColor: theme.border },
-                descFocused && {
-                  borderColor: COLORS.primary,
-                  backgroundColor: COLORS.primaryLight,
-                },
-              ]}
-            >
-              <Ionicons
-                name="information-circle-outline"
-                size={17}
-                color={descFocused ? COLORS.primary : theme.textTertiary}
-                style={{ marginRight: 10 }}
-              />
-              <TextInput
-                style={[s.input, { color: theme.text }]}
-                value={description}
-                onChangeText={setDescription}
-                placeholder="What is this book for?"
-                placeholderTextColor={theme.textTertiary}
-                maxLength={100}
-                onFocus={() => setDescFocused(true)}
-                onBlur={() => setDescFocused(false)}
-              />
-            </View>
-          </View>
-
-          {/* Color */}
-          <View style={s.section}>
-            <Text style={[s.label, { color: theme.textSecondary }]}>Color</Text>
-            <View style={s.colorGrid}>
-              {BOOK_COLORS.map((c) => (
-                <TouchableOpacity
-                  key={c}
-                  style={[
-                    s.colorSwatch,
-                    { backgroundColor: c },
-                    color === c && s.colorSwatchActive,
-                  ]}
-                  onPress={() => setColor(c)}
-                  activeOpacity={0.8}
-                >
-                  {color === c && (
-                    <Ionicons name="checkmark" size={14} color="#fff" />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-
-          {/* Currency */}
-          <View style={s.section}>
-            <Text style={[s.label, { color: theme.textSecondary }]}>
-              Currency
-            </Text>
-            <View style={s.currencyGrid}>
-              {CURRENCIES.map((curr) => {
-                const active = currency === curr.code;
-                return (
+          {/* Suggestions */}
+          {filteredSuggestions.length > 0 && (
+            <View style={s.suggestionsSection}>
+              <Text style={[s.suggestionsLabel, { color: theme.textTertiary }]}>Suggestions</Text>
+              <View style={s.suggestionsWrap}>
+                {filteredSuggestions.slice(0, 6).map(sug => (
                   <TouchableOpacity
-                    key={curr.code}
-                    style={[
-                      s.currencyChip,
-                      {
-                        backgroundColor: theme.surface,
-                        borderColor: theme.border,
-                      },
-                      active && {
-                        borderColor: COLORS.primary,
-                        backgroundColor: COLORS.primaryLight,
-                      },
-                    ]}
-                    onPress={() => setCurrency(curr.code)}
+                    key={sug}
+                    style={[s.chip, { borderColor: theme.border, backgroundColor: theme.surface }]}
+                    onPress={() => setName(sug)}
                     activeOpacity={0.8}
                   >
-                    <Text
-                      style={[
-                        s.currSymbol,
-                        {
-                          color: active ? COLORS.primary : theme.textSecondary,
-                        },
-                      ]}
-                    >
-                      {curr.symbol}
-                    </Text>
-                    <Text
-                      style={[
-                        s.currCode,
-                        {
-                          color: active ? COLORS.primary : theme.textSecondary,
-                          fontWeight: active ? "700" : "400",
-                        },
-                      ]}
-                    >
-                      {curr.code}
-                    </Text>
+                    <Text style={[s.chipText, { color: theme.textSecondary }]}>{sug}</Text>
                   </TouchableOpacity>
-                );
-              })}
+                ))}
+              </View>
             </View>
+          )}
+
+          {/* Currency selector */}
+          <Text style={[s.fieldLabel, { color: theme.textSecondary, marginTop: SPACING.lg }]}>
+            Currency
+          </Text>
+          <View style={s.currencyRow}>
+            {CURRENCIES.map(curr => (
+              <TouchableOpacity
+                key={curr.code}
+                style={[
+                  s.currChip,
+                  { borderColor: theme.border, backgroundColor: theme.surface },
+                  currency === curr.code && { borderColor: COLORS.primary, backgroundColor: COLORS.primaryLight },
+                ]}
+                onPress={() => setCurrency(curr.code)}
+                activeOpacity={0.8}
+              >
+                <Text style={[
+                  s.currChipText,
+                  { color: currency === curr.code ? COLORS.primary : theme.textSecondary },
+                ]}>
+                  {curr.symbol} {curr.code}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
 
-          {/* Save button */}
+        </ScrollView>
+
+        {/* Add button — pinned at bottom */}
+        <View style={[s.bottomBar, { backgroundColor: bg, borderTopColor: theme.border }]}>
           <TouchableOpacity
-            style={[s.saveBtn, { opacity: loading ? 0.7 : 1 }]}
+            style={[
+              s.addBtn,
+              { backgroundColor: COLORS.primary },
+              (!name.trim() || loading) && { opacity: 0.5 },
+            ]}
             onPress={handleSave}
-            disabled={loading}
+            disabled={loading || !name.trim()}
             activeOpacity={0.88}
           >
-            <LinearGradient
-              colors={[color, color + "CC"]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={s.saveBtnGrad}
-            >
-              {loading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <>
-                  <Ionicons
-                    name={isEditing ? "checkmark" : "add"}
-                    size={20}
-                    color="#fff"
-                  />
-                  <Text style={s.saveBtnText}>
-                    {isEditing ? "Save Changes" : "Create Book"}
-                  </Text>
-                </>
-              )}
-            </LinearGradient>
+            {loading ? <ActivityIndicator color="#fff" /> : (
+              <>
+                <Ionicons name="add" size={20} color="#fff" />
+                <Text style={s.addBtnText}>
+                  {isEditing ? 'SAVE CHANGES' : 'ADD NEW BOOK'}
+                </Text>
+              </>
+            )}
           </TouchableOpacity>
-        </ScrollView>
+        </View>
       </SafeAreaView>
     </View>
-  );
+  )
 }
 
 const s = StyleSheet.create({
   safe: { flex: 1 },
-  scroll: { padding: SPACING.lg, paddingBottom: SPACING.xl },
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: SPACING.lg, paddingVertical: SPACING.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  headerTitle: { fontSize: FONT_SIZE.md, fontWeight: '700' },
+  closeBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
 
-  preview: {
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.xl,
-    marginBottom: SPACING.xl,
-    overflow: "hidden",
-    ...SHADOW.lg,
-  },
-  previewDeco: {
-    position: "absolute",
-    width: 150,
-    height: 150,
-    borderRadius: 75,
-    backgroundColor: "rgba(255,255,255,0.1)",
-    top: -50,
-    right: -30,
-  },
-  previewIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: "rgba(255,255,255,0.2)",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: SPACING.sm,
-  },
-  previewName: {
-    fontSize: FONT_SIZE.xl,
-    fontWeight: "800",
-    color: "#fff",
-    marginBottom: 2,
-  },
-  previewDesc: {
-    fontSize: FONT_SIZE.xs,
-    color: "rgba(255,255,255,0.75)",
-    marginBottom: SPACING.sm,
-  },
-  previewBalance: {
-    fontSize: FONT_SIZE["3xl"],
-    fontWeight: "900",
-    color: "#fff",
-    letterSpacing: -1,
-    marginTop: SPACING.sm,
-  },
+  scroll: { padding: SPACING.lg, paddingBottom: 16 },
 
-  section: { marginBottom: SPACING.lg },
-  label: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: "700",
-    marginBottom: SPACING.sm,
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-  },
+  fieldLabel: { fontSize: FONT_SIZE.xs, fontWeight: '600', marginBottom: SPACING.sm },
   inputWrap: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: BORDER_RADIUS.md,
-    borderWidth: 1.5,
-    paddingHorizontal: SPACING.md,
-    height: 50,
+    borderWidth: 1.5, borderRadius: BORDER_RADIUS.sm,
+    paddingHorizontal: SPACING.md, height: 52,
+    justifyContent: 'center',
   },
-  input: { flex: 1, fontSize: FONT_SIZE.md },
+  input: { fontSize: FONT_SIZE.md },
 
-  colorGrid: { flexDirection: "row", flexWrap: "wrap", gap: SPACING.sm },
-  colorSwatch: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
+  // Suggestions
+  suggestionsSection: { marginTop: SPACING.lg },
+  suggestionsLabel: { fontSize: FONT_SIZE.xs, fontWeight: '600', marginBottom: SPACING.sm },
+  suggestionsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm },
+  chip: {
+    paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.full, borderWidth: 1,
   },
-  colorSwatchActive: {
-    borderWidth: 3,
-    borderColor: "rgba(255,255,255,0.9)",
-    transform: [{ scale: 1.15 }],
-  },
+  chipText: { fontSize: FONT_SIZE.sm },
 
-  currencyGrid: { flexDirection: "row", flexWrap: "wrap", gap: SPACING.sm },
-  currencyChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.md,
-    borderWidth: 1.5,
+  // Currency
+  currencyRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm },
+  currChip: {
+    paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.sm, borderWidth: 1.5,
   },
-  currSymbol: { fontSize: FONT_SIZE.md, fontWeight: "700" },
-  currCode: { fontSize: FONT_SIZE.sm },
+  currChipText: { fontSize: FONT_SIZE.sm, fontWeight: '600' },
 
-  saveBtn: { borderRadius: BORDER_RADIUS.lg, overflow: "hidden", ...SHADOW.md },
-  saveBtnGrad: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 16,
-    gap: SPACING.sm,
+  // Bottom bar
+  bottomBar: { padding: SPACING.md, borderTopWidth: StyleSheet.hairlineWidth },
+  addBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: SPACING.sm, paddingVertical: 16, borderRadius: BORDER_RADIUS.sm,
   },
-  saveBtnText: { fontSize: FONT_SIZE.md, fontWeight: "700", color: "#fff" },
-});
+  addBtnText: { fontSize: FONT_SIZE.md, fontWeight: '700', color: '#fff', letterSpacing: 0.5 },
+})
