@@ -1,6 +1,7 @@
 {
   "cli": {
-    "version": ">= 18.5.0"
+    "version": ">= 18.5.0",
+    "appVersionSource": "remote"
   },
   "build": {
     "development": {
@@ -27,7 +28,8 @@
     },
     "production": {
       "android": {
-        "buildType": "app-bundle"
+        "buildType": "app-bundle",
+        "gradleCommand": ":app:bundleRelease"
       },
       "autoIncrement": true,
       "env": {
@@ -39,7 +41,8 @@
     "production": {
       "android": {
         "serviceAccountKeyPath": "./google-play-key.json",
-        "track": "internal"
+        "track": "internal",
+        "releaseStatus": "draft"
       }
     }
   }

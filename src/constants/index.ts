@@ -16,6 +16,11 @@ export const COLORS = {
   cashOutLight: '#FFF0F2',
   cashOutDark: '#E84560',
 
+  // Priority / status aliases
+  danger: '#FF647C',  // alias for cashOut - used for error/high-priority UI
+  warning: '#F59E0B',  // amber - medium priority
+  success: '#00C48C',  // alias for cashIn - used for success/low-priority UI
+
   // Surfaces
   background: '#F5F7FF',
   surface: '#FFFFFF',
@@ -33,8 +38,6 @@ export const COLORS = {
   borderDark: '#D1D5F0',
 
   // Status
-  success: '#00C48C',
-  warning: '#FFB020',
   error: '#FF647C',
   info: '#5B5FED',
 
@@ -52,9 +55,9 @@ export const CURRENCIES = [
   { code: 'EUR', symbol: '€', name: 'Euro' },
   { code: 'GBP', symbol: '£', name: 'British Pound' },
   { code: 'INR', symbol: '₹', name: 'Indian Rupee' },
+  { code: 'NPR', symbol: 'रू', name: 'Nepali Rupee' },
   { code: 'AED', symbol: 'د.إ', name: 'UAE Dirham' },
   { code: 'SAR', symbol: '﷼', name: 'Saudi Riyal' },
-  { code: 'NPR', symbol: 'रू', name: 'Nepali Rupee' },
   { code: 'BDT', symbol: '৳', name: 'Bangladeshi Taka' },
 ] as const
 

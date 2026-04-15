@@ -2,7 +2,7 @@
   "expo": {
     "name": "CashFlow",
     "slug": "cashflow",
-    "version": "4.4.0",
+    "version": "4.5.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -18,7 +18,13 @@
         "NSFaceIDUsageDescription": "Used for secure authentication",
         "NSUserNotificationUsageDescription": "We send notifications when you receive book invitations."
       },
-      "jsEngine": "hermes"
+      "jsEngine": "hermes",
+      "privacyManifests": {
+        "NSPrivacyAccessedAPITypes": [],
+        "NSPrivacyCollectedDataTypes": [],
+        "NSPrivacyTracking": false,
+        "NSPrivacyTrackingDomains": []
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -81,7 +87,8 @@
         "expo-build-properties",
         {
           "ios": {
-            "newArchEnabled": true
+            "newArchEnabled": true,
+            "useFrameworks": "static"
           },
           "android": {
             "newArchEnabled": false,
@@ -89,7 +96,8 @@
             "enableShrinkResourcesInReleaseBuilds": true,
             "compileSdkVersion": 34,
             "targetSdkVersion": 34,
-            "buildToolsVersion": "34.0.0"
+            "buildToolsVersion": "34.0.0",
+            "useLegacyPackaging": false
           }
         }
       ]

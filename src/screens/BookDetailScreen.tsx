@@ -1,8 +1,8 @@
-// src/screens/BookDetailScreen.tsx — Redesigned: minimal, date-grouped entries
+// src/screens/BookDetailScreen.tsx
 import React, { useEffect, useCallback, useState } from 'react'
 import {
-  View, Text, FlatList, TouchableOpacity, StyleSheet,
-  ActivityIndicator, RefreshControl, Pressable, SectionList,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet,
+  ActivityIndicator, RefreshControl, Pressable,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
@@ -12,14 +12,14 @@ import { useBooksStore } from '../store/booksStore'
 import { useAuthStore } from '../store/authStore'
 import { useThemeStore, getTheme } from '../store/themeStore'
 import { useEntriesRealtime } from '../hooks/useEntriesRealtime'
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '../constants'
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOW } from '../constants'
 import { themedAlert, themedActionSheet } from '../components/common/ThemedAlert'
 import { formatAmount } from '../utils'
 import { format, isToday, isYesterday } from 'date-fns'
 import type { Entry, EntryFilter } from '../types'
 
 // ── Group entries by date ────────────────────────────────────
-function groupByDate(entries: Entry[]) {
+function groupByDate(entries: Entry[]): { title: string; data: Entry[] }[] {
   const groups: Record<string, Entry[]> = {}
   for (const e of entries) {
     const key = format(new Date(e.entry_date), 'yyyy-MM-dd')
@@ -31,7 +31,7 @@ function groupByDate(entries: Entry[]) {
     .map(key => ({ title: key, data: groups[key] }))
 }
 
-function formatSectionTitle(dateStr: string): string {
+function formatDateLabel(dateStr: string): string {
   const d = new Date(dateStr)
   if (isToday(d)) return `Today, ${format(d, 'dd MMMM yyyy')}`
   if (isYesterday(d)) return `Yesterday, ${format(d, 'dd MMMM yyyy')}`
@@ -63,7 +63,6 @@ export default function BookDetailScreen({ route, navigation }: any) {
 
   useEffect(() => {
     navigation.setOptions({
-      title: '',
       headerLeft: () => (
         <TouchableOpacity onPress={() => navigation.goBack()} style={{ padding: 4, marginLeft: 4 }}>
           <Ionicons name="arrow-back" size={24} color={theme.text} />
@@ -74,12 +73,9 @@ export default function BookDetailScreen({ route, navigation }: any) {
           <Text style={{ fontSize: FONT_SIZE.md, fontWeight: '700', color: theme.text }}>
             {currentBook?.name || 'Book'}
           </Text>
-          {currentBook && (
-            <Text style={{ fontSize: FONT_SIZE.xs, color: theme.textTertiary }}>
-              {/* Show member names if available */}
-              {currentBook.currency}
-            </Text>
-          )}
+          <Text style={{ fontSize: FONT_SIZE.xs, color: theme.textTertiary }}>
+            {currentBook?.currency || ''}
+          </Text>
         </View>
       ),
       headerRight: () => (
@@ -113,30 +109,20 @@ export default function BookDetailScreen({ route, navigation }: any) {
       e.note || (isCashIn ? 'Cash In' : 'Cash Out'),
       formatAmount(e.amount, currentBook?.currency),
       [
+        { text: 'Edit Entry', onPress: () => navigation.navigate('AddEditEntry', { bookId, entry: e, currency: currentBook?.currency }) },
         {
-          text: 'Edit Entry',
-          onPress: () => navigation.navigate('AddEditEntry', {
-            bookId, entry: e, currency: currentBook?.currency,
-          }),
-        },
-        {
-          text: 'Delete Entry',
-          style: 'destructive' as const,
+          text: 'Delete Entry', style: 'destructive' as const,
           onPress: () => themedAlert(
             'Delete Entry',
             `Remove ${formatAmount(e.amount, currentBook?.currency)}${e.note ? ` "${e.note}"` : ''}?`,
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Delete', style: 'destructive',
-                onPress: async () => {
-                  const { error } = await deleteEntry(e.id, bookId)
-                  if (error) themedAlert('Error', error)
-                },
-              },
-            ],
-            'trash-outline',
-          ),
+            [{ text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Delete', style: 'destructive', onPress: async () => {
+                const { error } = await deleteEntry(e.id, bookId)
+                if (error) themedAlert('Error', error)
+              }
+            }],
+            'trash-outline'),
         },
         { text: 'Cancel', style: 'cancel' as const },
       ]
@@ -144,165 +130,145 @@ export default function BookDetailScreen({ route, navigation }: any) {
   }
 
   const bal = summary?.balance ?? 0
-  const sections = groupByDate(entries)
+  const groups = groupByDate(entries)
 
-  const renderEntry = ({ item: e }: { item: Entry }) => {
+  const renderEntry = (e: Entry, isLast: boolean) => {
     const isCashIn = e.type === 'cash_in'
     const isMe = e.user_id === user?.id
     const entryBy = e.profile?.full_name || e.profile?.email
     const timeStr = format(new Date(e.entry_date), 'h:mm a')
 
     return (
-      <Pressable
-        style={({ pressed }) => [s.entryRow, { backgroundColor: theme.surface }, pressed && { opacity: 0.85 }]}
-        onPress={() => navigation.navigate('AddEditEntry', { bookId, entry: e, currency: currentBook?.currency })}
-      >
-        {/* Type badge */}
-        <View style={[
-          s.typeBadge,
-          { backgroundColor: isCashIn ? '#1a2e1a' : '#2e1a1a' },
-        ]}>
-          <Text style={[s.typeBadgeText, { color: isCashIn ? COLORS.cashIn : COLORS.cashOut }]}>
-            {isCashIn ? 'Cash' : 'Cash'}
-          </Text>
-        </View>
-
-        {/* Content */}
-        <View style={s.entryContent}>
-          {/* Amount + balance row */}
-          <View style={s.entryTopRow}>
-            <Text style={[s.entryAmt, { color: isCashIn ? COLORS.cashIn : COLORS.cashOut }]}>
-              {isCashIn ? '+' : ''}{formatAmount(e.amount, currentBook?.currency)}
-            </Text>
-            {e.running_balance !== undefined && (
-              <Text style={[s.entryRunBal, { color: theme.textTertiary }]}>
-                Balance: {formatAmount(e.running_balance, currentBook?.currency)}
-              </Text>
-            )}
-          </View>
-          {/* Remark */}
-          {e.note ? (
-            <Text style={[s.entryNote, { color: theme.text }]} numberOfLines={1}>
-              {e.note}
-            </Text>
-          ) : null}
-          {/* Entry by + time */}
-          <View style={s.entryMeta}>
-            {!isMe && entryBy ? (
-              <Text style={[s.entryByText, { color: COLORS.primary }]}>
-                Entry by {entryBy}{'  '}
-              </Text>
-            ) : null}
-            <Text style={[s.entryTime, { color: theme.textTertiary }]}>
-              {isMe ? `at ${timeStr}` : `at ${timeStr}`}
-            </Text>
-          </View>
-        </View>
-
-        {/* Three-dot */}
-        <TouchableOpacity
-          onPress={() => handleEntryThreeDot(e)}
-          style={s.dotBtn}
-          hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+      <View key={e.id}>
+        <Pressable
+          style={({ pressed }) => [s.entryRow, pressed && { opacity: 0.82 }]}
+          onPress={() => navigation.navigate('AddEditEntry', { bookId, entry: e, currency: currentBook?.currency })}
         >
-          <Ionicons name="ellipsis-vertical" size={16} color={theme.textTertiary} />
-        </TouchableOpacity>
-      </Pressable>
+          {/* Type badge */}
+          {/* <View style={[s.typeBadge, {
+            backgroundColor: isCashIn ? COLORS.cashInLight : COLORS.cashOutLight,
+          }]}>
+            <Text style={[s.typeBadgeText, { color: isCashIn ? COLORS.cashIn : COLORS.cashOut }]}>
+              {isCashIn ? 'IN' : 'OUT'}
+            </Text>
+          </View> */}
+
+          {/* Content */}
+          <View style={s.entryContent}>
+            <Text style={[s.entryAmt, { color: isCashIn ? COLORS.cashIn : COLORS.cashOut }]}>
+              {formatAmount(e.amount, currentBook?.currency)}
+            </Text>
+            {e.note ? (
+              <Text style={[s.entryNote, { color: theme.text }]} numberOfLines={1}>{e.note}</Text>
+            ) : null}
+            <View style={s.entryMeta}>
+              {!isMe && entryBy ? (
+                <Text style={[s.entryByText, { color: COLORS.primary }]}>Entry by {entryBy}  </Text>
+              ) : null}
+              <Text style={[s.entryTime, { color: theme.textTertiary }]}>at {timeStr}</Text>
+            </View>
+          </View>
+
+          {/* Three-dot */}
+          <TouchableOpacity
+            onPress={() => handleEntryThreeDot(e)}
+            style={s.dotBtn}
+            hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+          >
+            <Ionicons name="ellipsis-vertical" size={16} color={theme.textTertiary} />
+          </TouchableOpacity>
+        </Pressable>
+        {/* Row separator inside card */}
+        {!isLast && <View style={[s.entrySep, { backgroundColor: theme.border }]} />}
+      </View>
     )
   }
 
-  const renderSectionHeader = ({ section }: any) => (
-    <View style={[s.sectionHeader, { backgroundColor: theme.background }]}>
-      <Text style={[s.sectionHeaderText, { color: theme.textTertiary }]}>
-        {formatSectionTitle(section.title)}
-      </Text>
-    </View>
-  )
+  if (isLoading && entries.length === 0) {
+    return (
+      <SafeAreaView style={[s.container, { backgroundColor: theme.background }]} edges={['bottom']}>
+        <View style={s.loader}><ActivityIndicator color={COLORS.primary} size="large" /></View>
+      </SafeAreaView>
+    )
+  }
 
   return (
     <SafeAreaView style={[s.container, { backgroundColor: theme.background }]} edges={['bottom']}>
-      {/* Balance panel */}
-      <View style={[s.balancePanel, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
-        <View style={s.balancePanelRow}>
-          <View style={s.balancePanelItem}>
-            <Text style={[s.balancePanelLabel, { color: theme.textSecondary }]}>Net Balance</Text>
-            <Text style={[s.balancePanelVal, {
-              color: bal >= 0 ? COLORS.cashIn : COLORS.cashOut,
-            }]}>
-              {bal >= 0 ? '' : '-'}{formatAmount(Math.abs(bal), currentBook?.currency)}
-            </Text>
-          </View>
-        </View>
-        <View style={[s.balanceDivider, { backgroundColor: theme.border }]} />
-        <View style={s.balanceSubRow}>
-          <View style={s.balanceSubItem}>
-            <Text style={[s.balanceSubLabel, { color: theme.textSecondary }]}>Total In (+)</Text>
-            <Text style={[s.balanceSubVal, { color: COLORS.cashIn }]}>
-              {formatAmount(summary?.cash_in || 0, currentBook?.currency)}
-            </Text>
-          </View>
-          <View style={s.balanceSubItem}>
-            <Text style={[s.balanceSubLabel, { color: theme.textSecondary }]}>Total Out (-)</Text>
-            <Text style={[s.balanceSubVal, { color: COLORS.cashOut }]}>
-              {formatAmount(summary?.cash_out || 0, currentBook?.currency)}
-            </Text>
-          </View>
-        </View>
-      </View>
-
-      {/* Filter tabs */}
-      <View style={[s.filterRow, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
-        {FILTERS.map(f => (
-          <TouchableOpacity
-            key={f.key}
-            style={[
-              s.filterTab,
-              filter === f.key && { borderBottomColor: COLORS.primary, borderBottomWidth: 2 },
-            ]}
-            onPress={() => setFilter(f.key, bookId)}
-          >
-            <Text style={[
-              s.filterTabText,
-              { color: filter === f.key ? COLORS.primary : theme.textSecondary },
-              filter === f.key && { fontWeight: '700' },
-            ]}>
-              {f.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-        <Text style={[s.entryCount, { color: theme.textTertiary }]}>
-          Showing {entries.length} entries
-        </Text>
-      </View>
-
-      {/* Entry list */}
-      {isLoading && entries.length === 0 ? (
-        <View style={s.loader}><ActivityIndicator color={COLORS.primary} /></View>
-      ) : (
-        <SectionList
-          sections={sections}
-          keyExtractor={e => e.id}
-          renderItem={renderEntry}
-          renderSectionHeader={renderSectionHeader}
-          contentContainerStyle={s.list}
-          showsVerticalScrollIndicator={false}
-          stickySectionHeadersEnabled
-          ListEmptyComponent={
-            <View style={s.empty}>
-              <Ionicons name="receipt-outline" size={44} color={theme.textTertiary} />
-              <Text style={[s.emptyTitle, { color: theme.text }]}>No entries yet</Text>
-              <Text style={[s.emptyBody, { color: theme.textSecondary }]}>
-                Tap + to add your first entry
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={s.scroll}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
+      >
+        {/* ── Balance card — rounded like Settings ──── */}
+        <View style={[s.balanceCard, { backgroundColor: theme.surface }]}>
+          <Text style={[s.balanceLabel, { color: theme.textSecondary }]}>Net Balance</Text>
+          <Text style={[s.balanceVal, { color: bal >= 0 ? COLORS.cashIn : COLORS.cashOut }]}>
+            {formatAmount(Math.abs(bal), currentBook?.currency)}
+          </Text>
+          <View style={[s.balanceDivider, { backgroundColor: theme.border }]} />
+          <View style={s.balanceRow}>
+            <View style={s.balanceItem}>
+              <Text style={[s.balanceItemLabel, { color: theme.textSecondary }]}>Total In (+)</Text>
+              <Text style={[s.balanceItemVal, { color: COLORS.cashIn }]}>
+                {formatAmount(summary?.cash_in || 0, currentBook?.currency)}
               </Text>
             </View>
-          }
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />
-          }
-        />
-      )}
+            <View style={[s.balanceMidLine, { backgroundColor: theme.border }]} />
+            <View style={s.balanceItem}>
+              <Text style={[s.balanceItemLabel, { color: theme.textSecondary }]}>Total Out (-)</Text>
+              <Text style={[s.balanceItemVal, { color: COLORS.cashOut }]}>
+                {formatAmount(summary?.cash_out || 0, currentBook?.currency)}
+              </Text>
+            </View>
+          </View>
+        </View>
 
-      {/* Single + FAB */}
+        {/* ── Filter tabs — in their own rounded card ── */}
+        <View style={[s.filterCard, { backgroundColor: theme.surface }]}>
+          {FILTERS.map(f => (
+            <TouchableOpacity
+              key={f.key}
+              style={[s.filterTab, filter === f.key && { borderBottomColor: COLORS.primary, borderBottomWidth: 2 }]}
+              onPress={() => setFilter(f.key, bookId)}
+            >
+              <Text style={[
+                s.filterTabText,
+                { color: filter === f.key ? COLORS.primary : theme.textSecondary },
+                filter === f.key && { fontWeight: '700' },
+              ]}>
+                {f.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+          <Text style={[s.entryCount, { color: theme.textTertiary }]}>
+            {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
+          </Text>
+        </View>
+
+        {/* ── Entry groups — each date group is its own rounded card ── */}
+        {entries.length === 0 ? (
+          <View style={s.empty}>
+            <Ionicons name="receipt-outline" size={44} color={theme.textTertiary} />
+            <Text style={[s.emptyTitle, { color: theme.text }]}>No entries yet</Text>
+            <Text style={[s.emptyBody, { color: theme.textSecondary }]}>Tap + to add your first entry</Text>
+          </View>
+        ) : (
+          groups.map(group => (
+            <View key={group.title}>
+              {/* Date label above each group card */}
+              <Text style={[s.dateLabel, { color: theme.textTertiary }]}>
+                {formatDateLabel(group.title)}
+              </Text>
+              {/* All entries for this date in one rounded card */}
+              <View style={[s.entryGroupCard, { backgroundColor: theme.surface }]}>
+                {group.data.map((e, idx) => renderEntry(e, idx === group.data.length - 1))}
+              </View>
+            </View>
+          ))
+        )}
+      </ScrollView>
+
+      {/* FAB */}
       <TouchableOpacity
         style={[s.fab, { backgroundColor: COLORS.primary }]}
         onPress={() => navigation.navigate('AddEditEntry', { bookId, currency: currentBook?.currency })}
@@ -316,50 +282,75 @@ export default function BookDetailScreen({ route, navigation }: any) {
 
 const s = StyleSheet.create({
   container: { flex: 1 },
-  loader: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 40 },
-  list: { paddingBottom: 100 },
+  loader: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  scroll: { paddingBottom: 100 },
 
-  // Balance panel
-  balancePanel: { padding: SPACING.lg, borderBottomWidth: StyleSheet.hairlineWidth },
-  balancePanelRow: { marginBottom: SPACING.md },
-  balancePanelItem: {},
-  balancePanelLabel: { fontSize: FONT_SIZE.sm, marginBottom: 4 },
-  balancePanelVal: { fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
-  balanceDivider: { height: StyleSheet.hairlineWidth, marginBottom: SPACING.md },
-  balanceSubRow: { flexDirection: 'row' },
-  balanceSubItem: { flex: 1 },
-  balanceSubLabel: { fontSize: FONT_SIZE.xs, marginBottom: 2 },
-  balanceSubVal: { fontSize: FONT_SIZE.md, fontWeight: '700' },
-
-  // Filter row
-  filterRow: {
-    flexDirection: 'row', alignItems: 'center',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: SPACING.lg,
+  // ── Balance card ─────────────────────────────────────────
+  balanceCard: {
+    marginHorizontal: SPACING.lg,
+    marginTop: SPACING.md,
+    marginBottom: SPACING.sm,
+    padding: SPACING.lg,
+    borderRadius: BORDER_RADIUS.lg,   // ← rounded, same as Settings
+    overflow: 'hidden',
+    ...SHADOW.sm,
   },
-  filterTab: { paddingVertical: SPACING.sm, marginRight: SPACING.lg },
+  balanceLabel: { fontSize: FONT_SIZE.sm, marginBottom: 4 },
+  balanceVal: { fontSize: 28, fontWeight: '800', letterSpacing: -0.5, marginBottom: SPACING.md },
+  balanceDivider: { height: StyleSheet.hairlineWidth, marginBottom: SPACING.md },
+  balanceRow: { flexDirection: 'row', alignItems: 'center' },
+  balanceItem: { flex: 1 },
+  balanceItemLabel: { fontSize: FONT_SIZE.xs, marginBottom: 2 },
+  balanceItemVal: { fontSize: FONT_SIZE.md, fontWeight: '700' },
+  balanceMidLine: { width: StyleSheet.hairlineWidth, height: 32, marginHorizontal: SPACING.lg },
+
+  // ── Filter card ──────────────────────────────────────────
+  filterCard: {
+    flexDirection: 'row', alignItems: 'center',
+    marginHorizontal: SPACING.lg,
+    marginBottom: SPACING.sm,
+    paddingHorizontal: SPACING.md,
+    borderRadius: BORDER_RADIUS.lg,   // ← rounded
+    overflow: 'hidden',
+    ...SHADOW.sm,
+  },
+  filterTab: { paddingVertical: SPACING.md, marginRight: SPACING.md },
   filterTabText: { fontSize: FONT_SIZE.sm },
-  entryCount: { marginLeft: 'auto', fontSize: FONT_SIZE.xs },
+  entryCount: { marginLeft: 'auto', fontSize: FONT_SIZE.xs, paddingVertical: SPACING.md },
 
-  // Section header
-  sectionHeader: { paddingHorizontal: SPACING.lg, paddingVertical: 6 },
-  sectionHeaderText: { fontSize: FONT_SIZE.xs, fontWeight: '600' },
+  // ── Date label above each group ──────────────────────────
+  dateLabel: {
+    paddingHorizontal: SPACING.lg + SPACING.sm,
+    paddingVertical: 6,
+    fontSize: FONT_SIZE.xs, fontWeight: '600',
+  },
 
-  // Entry row
+  // ── Entry group card — ONE card per date group ───────────
+  entryGroupCard: {
+    marginHorizontal: SPACING.lg,
+    marginBottom: SPACING.sm,
+    borderRadius: BORDER_RADIUS.lg,   // ← rounded, same curve as Settings
+    overflow: 'hidden',
+    ...SHADOW.sm,
+  },
   entryRow: {
     flexDirection: 'row', alignItems: 'flex-start',
-    paddingHorizontal: SPACING.lg, paddingVertical: SPACING.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: SPACING.md, paddingVertical: SPACING.md,
   },
+  // Separator inside the group card
+  entrySep: {
+    height: StyleSheet.hairlineWidth,
+    marginLeft: SPACING.md + 38 + SPACING.sm,
+  },
+
   typeBadge: {
-    paddingHorizontal: 8, paddingVertical: 4,
+    paddingHorizontal: 7, paddingVertical: 3,
     borderRadius: BORDER_RADIUS.sm, marginRight: SPACING.sm, marginTop: 2,
+    minWidth: 36, alignItems: 'center',
   },
-  typeBadgeText: { fontSize: 11, fontWeight: '700' },
+  typeBadgeText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.3 },
   entryContent: { flex: 1 },
-  entryTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 2 },
-  entryAmt: { fontSize: FONT_SIZE.lg, fontWeight: '700' },
-  entryRunBal: { fontSize: FONT_SIZE.xs },
+  entryAmt: { fontSize: FONT_SIZE.lg, fontWeight: '700', marginBottom: 2 },
   entryNote: { fontSize: FONT_SIZE.sm, marginBottom: 3 },
   entryMeta: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
   entryByText: { fontSize: FONT_SIZE.xs, fontWeight: '600' },

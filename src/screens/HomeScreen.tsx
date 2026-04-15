@@ -1,8 +1,8 @@
-// src/screens/HomeScreen.tsx — Redesigned: minimal, CashBook-inspired
-import React, { useCallback, useState } from 'react'
+// src/screens/HomeScreen.tsx
+import React, { useCallback, useState, useMemo } from 'react'
 import {
-  View, Text, FlatList, TouchableOpacity, StyleSheet,
-  ActivityIndicator, RefreshControl, Pressable,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet,
+  ActivityIndicator, RefreshControl, Pressable, TextInput,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
@@ -11,7 +11,7 @@ import { useBooksStore } from '../store/booksStore'
 import { useAuthStore } from '../store/authStore'
 import { useOfflineStore } from '../store/offlineStore'
 import { useThemeStore, getTheme } from '../store/themeStore'
-import { COLORS, SPACING, FONT_SIZE } from '../constants'
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOW } from '../constants'
 import { themedAlert, themedActionSheet } from '../components/common/ThemedAlert'
 import { formatAmount, getInitials } from '../utils'
 import type { Book } from '../types'
@@ -22,210 +22,213 @@ export default function HomeScreen({ navigation }: any) {
   const { isOnline } = useOfflineStore()
   const { mode } = useThemeStore()
   const theme = getTheme(mode)
+
   const [refreshing, setRefreshing] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchActive, setSearchActive] = useState(false)
 
   useFocusEffect(useCallback(() => { fetchBooks() }, []))
 
   const onRefresh = async () => {
-    setRefreshing(true)
-    await fetchBooks()
-    setRefreshing(false)
+    setRefreshing(true); await fetchBooks(); setRefreshing(false)
   }
 
-  const handleThreeDot = (book: Book) => {
-    const currentUser = useAuthStore.getState().user
-    const isOwner = book.role === 'owner' || book.owner_id === currentUser?.id
-    if (!isOwner) return
+  const filteredBooks = useMemo(() => {
+    if (!searchQuery.trim()) return books
+    const q = searchQuery.toLowerCase()
+    return books.filter(b => b.name.toLowerCase().includes(q))
+  }, [books, searchQuery])
 
+  const handleThreeDot = (book: Book) => {
+    const u = useAuthStore.getState().user
+    if (book.role !== 'owner' && book.owner_id !== u?.id) return
     themedActionSheet(book.name, undefined, [
+      { text: 'Edit Book', onPress: () => navigation.navigate('CreateBook', { book }) },
       {
-        text: 'Edit Book',
-        onPress: () => navigation.navigate('CreateBook', { book }),
-      },
-      {
-        text: 'Delete Book',
-        style: 'destructive' as const,
+        text: 'Delete Book', style: 'destructive' as const,
         onPress: () => themedAlert(
-          `Delete "${book.name}"?`,
-          'All entries will be permanently removed. This cannot be undone.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Delete', style: 'destructive',
-              onPress: async () => {
-                const { error } = await deleteBook(book.id)
-                if (error) themedAlert('Delete Failed', error)
-              },
-            },
-          ],
-          'trash-outline',
-        ),
+          `Delete "${book.name}"?`, 'All entries will be permanently removed.',
+          [{ text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete', style: 'destructive', onPress: async () => {
+              const { error } = await deleteBook(book.id)
+              if (error) themedAlert('Delete Failed', error)
+            }
+          }],
+          'trash-outline'),
       },
       { text: 'Cancel', style: 'cancel' as const },
     ])
-  }
-
-  // ── Book icon letters from name ──────────────────────────────
-  const bookInitials = (name: string) => name.slice(0, 2).toUpperCase()
-
-  const renderBook = ({ item: book }: { item: Book }) => {
-    const isPositive = (book.balance || 0) >= 0
-    const hasMembers = (book.member_count || 1) > 1
-
-    return (
-      <Pressable
-        style={({ pressed }) => [s.row, { backgroundColor: theme.surface }, pressed && { opacity: 0.85 }]}
-        onPress={() => navigation.navigate('BookDetail', { bookId: book.id, bookName: book.name })}
-      >
-        {/* Book icon */}
-        <View style={[s.bookIconWrap, { backgroundColor: COLORS.primaryLight }]}>
-          <Text style={s.bookIconText}>{bookInitials(book.name)}</Text>
-        </View>
-
-        {/* Name + meta */}
-        <View style={s.rowMid}>
-          <Text style={[s.rowName, { color: theme.text }]} numberOfLines={1}>
-            {book.name}
-          </Text>
-          <View style={s.rowMeta}>
-            {hasMembers && (
-              <View style={s.metaItem}>
-                <Ionicons name="people-outline" size={12} color={theme.textTertiary} />
-                <Text style={[s.metaText, { color: theme.textTertiary }]}>
-                  {' '}{book.member_count} Members ·{' '}
-                </Text>
-              </View>
-            )}
-            <Text style={[s.metaText, { color: theme.textTertiary }]}>
-              {book.currency}
-            </Text>
-          </View>
-        </View>
-
-        {/* Balance */}
-        <Text style={[
-          s.rowBalance,
-          { color: isPositive ? COLORS.cashIn : COLORS.cashOut },
-        ]}>
-          {isPositive ? '' : '-'}{formatAmount(Math.abs(book.balance || 0), book.currency)}
-        </Text>
-
-        {/* Three-dot */}
-        <TouchableOpacity
-          onPress={() => handleThreeDot(book)}
-          style={s.dotBtn}
-          hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
-        >
-          <Ionicons name="ellipsis-vertical" size={18} color={theme.textTertiary} />
-        </TouchableOpacity>
-
-        {/* Row separator */}
-      </Pressable>
-    )
   }
 
   const totalBalance = books.reduce((s, b) => s + (b.balance || 0), 0)
   const totalIn = books.reduce((s, b) => s + (b.cash_in || 0), 0)
   const totalOut = books.reduce((s, b) => s + (b.cash_out || 0), 0)
 
-  const ListHeader = () => (
-    <View>
-      {/* Top bar — business name + icons */}
-      <View style={[s.topBar, { borderBottomColor: theme.border }]}>
-        <View style={s.topLeft}>
-          <TouchableOpacity
-            onPress={() => navigation.navigate('Settings')}
-            style={[s.avatarSmall, { backgroundColor: COLORS.primaryLight }]}
-          >
-            <Text style={s.avatarSmallText}>
-              {getInitials(user?.full_name || user?.email || '?')}
-            </Text>
-          </TouchableOpacity>
-          <View>
-            <Text style={[s.businessName, { color: theme.text }]} numberOfLines={1}>
-              {user?.full_name || user?.email?.split('@')[0] || 'My Business'}
-            </Text>
-            <Text style={[s.businessSub, { color: theme.textTertiary }]}>
-              {books.length} book{books.length !== 1 ? 's' : ''}
-              {!isOnline ? ' · Offline' : ''}
-            </Text>
-          </View>
-        </View>
-        <TouchableOpacity
-          style={s.topIconBtn}
-          onPress={() => navigation.navigate('Notifications')}
-        >
-          <Ionicons name="person-add-outline" size={22} color={theme.text} />
-        </TouchableOpacity>
-      </View>
-
-      {/* Balance summary panel */}
-      {/* <View style={[s.summaryPanel, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
-        <View style={s.summaryMain}>
-          <Text style={[s.summaryLabel, { color: theme.textSecondary }]}>Net Balance</Text>
-          <Text style={[s.summaryBalance, {
-            color: totalBalance >= 0 ? COLORS.cashIn : COLORS.cashOut,
-          }]}>
-            {totalBalance >= 0 ? '' : '-'}{formatAmount(Math.abs(totalBalance))}
-          </Text>
-        </View>
-        <View style={[s.summaryDivider, { backgroundColor: theme.border }]} />
-        <View style={s.summaryRow}>
-          <View style={s.summaryItem}>
-            <Text style={[s.summaryItemLabel, { color: theme.textTertiary }]}>Total In (+)</Text>
-            <Text style={[s.summaryItemVal, { color: COLORS.cashIn }]}>
-              {formatAmount(totalIn)}
-            </Text>
-          </View>
-          <View style={s.summaryItem}>
-            <Text style={[s.summaryItemLabel, { color: theme.textTertiary }]}>Total Out (-)</Text>
-            <Text style={[s.summaryItemVal, { color: COLORS.cashOut }]}>
-              {formatAmount(totalOut)}
-            </Text>
-          </View>
-        </View>
-      </View> */}
-
-      {/* Section title */}
-      <View style={s.sectionRow}>
-        <Text style={[s.sectionTitle, { color: theme.textSecondary }]}>Your Books</Text>
-        <View style={s.sectionRight}>
-          <Ionicons name="funnel-outline" size={16} color={theme.textTertiary} style={{ marginRight: 12 }} />
-          <Ionicons name="search-outline" size={16} color={theme.textTertiary} />
-        </View>
-      </View>
-    </View>
-  )
+  if (isLoading && books.length === 0) {
+    return (
+      <SafeAreaView style={[s.container, { backgroundColor: theme.background }]}>
+        <View style={s.loader}><ActivityIndicator size="large" color={COLORS.primary} /></View>
+      </SafeAreaView>
+    )
+  }
 
   return (
     <SafeAreaView style={[s.container, { backgroundColor: theme.background }]}>
-      {isLoading && books.length === 0 ? (
-        <View style={s.loader}>
-          <ActivityIndicator size="large" color={COLORS.primary} />
-        </View>
-      ) : (
-        <FlatList
-          data={books}
-          keyExtractor={b => b.id}
-          renderItem={renderBook}
-          ListHeaderComponent={<ListHeader />}
-          ListEmptyComponent={
-            <View style={s.empty}>
-              <Ionicons name="book-outline" size={48} color={theme.textTertiary} />
-              <Text style={[s.emptyTitle, { color: theme.text }]}>No books yet</Text>
-              <Text style={[s.emptyBody, { color: theme.textSecondary }]}>
-                Tap + to create your first book
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={s.scroll}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* ── Top bar ─────────────────────────────────── */}
+        <View style={[s.topBar, { borderBottomColor: theme.border }]}>
+          <View style={s.topLeft}>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('Settings')}
+              style={[s.avatarSmall, { backgroundColor: COLORS.primaryLight }]}
+            >
+              <Text style={s.avatarSmallText}>
+                {getInitials(user?.full_name || user?.email || '?')}
+              </Text>
+            </TouchableOpacity>
+            <View>
+              <Text style={[s.businessName, { color: theme.text }]} numberOfLines={1}>
+                {user?.full_name || user?.email?.split('@')[0] || 'My Business'}
+              </Text>
+              <Text style={[s.businessSub, { color: theme.textTertiary }]}>
+                {books.length} book{books.length !== 1 ? 's' : ''}{!isOnline ? ' · Offline' : ''}
               </Text>
             </View>
-          }
-          contentContainerStyle={s.list}
-          showsVerticalScrollIndicator={false}
-          ItemSeparatorComponent={() => <View style={[s.separator, { backgroundColor: theme.border }]} />}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />
-          }
-        />
-      )}
+          </View>
+          {/* <TouchableOpacity style={s.topIconBtn} onPress={() => navigation.navigate('Notifications')}>
+            <Ionicons name="person-add-outline" size={22} color={theme.text} />
+          </TouchableOpacity> */}
+        </View>
+
+        {/* ── Summary card — rounded like Settings ─────── */}
+        {/* <View style={[s.summaryCard, { backgroundColor: theme.surface }]}>
+          <Text style={[s.summaryLabel, { color: theme.textSecondary }]}>Net Balance</Text>
+          <Text style={[s.summaryBalance, { color: totalBalance >= 0 ? COLORS.cashIn : COLORS.cashOut }]}>
+            {totalBalance >= 0 ? '' : '-'}{formatAmount(Math.abs(totalBalance))}
+          </Text>
+          <View style={[s.summaryDivider, { backgroundColor: theme.border }]} />
+          <View style={s.summaryRow}>
+            <View style={s.summaryItem}>
+              <Text style={[s.summaryItemLabel, { color: theme.textTertiary }]}>Total In (+)</Text>
+              <Text style={[s.summaryItemVal, { color: COLORS.cashIn }]}>{formatAmount(totalIn)}</Text>
+            </View>
+            <View style={[s.summaryMidLine, { backgroundColor: theme.border }]} />
+            <View style={s.summaryItem}>
+              <Text style={[s.summaryItemLabel, { color: theme.textTertiary }]}>Total Out (-)</Text>
+              <Text style={[s.summaryItemVal, { color: COLORS.cashOut }]}>{formatAmount(totalOut)}</Text>
+            </View>
+          </View>
+        </View> */}
+
+        {/* ── Section header + search ──────────────────── */}
+        <View style={s.sectionRow}>
+          {searchActive ? (
+            <View style={[s.searchBar, { backgroundColor: theme.surfaceSecondary, borderColor: theme.border }]}>
+              <Ionicons name="search-outline" size={15} color={theme.textTertiary} />
+              <TextInput
+                style={[s.searchInput, { color: theme.text }]}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder="Search books..."
+                placeholderTextColor={theme.textTertiary}
+                autoFocus
+                returnKeyType="search"
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => setSearchQuery('')}>
+                  <Ionicons name="close-circle" size={15} color={theme.textTertiary} />
+                </TouchableOpacity>
+              )}
+            </View>
+          ) : (
+            <Text style={[s.sectionTitle, { color: theme.textSecondary }]}>Your Books</Text>
+          )}
+          <TouchableOpacity
+            onPress={() => { if (searchActive) { setSearchQuery(''); setSearchActive(false) } else setSearchActive(true) }}
+            style={s.searchToggleBtn}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons
+              name={searchActive ? 'close' : 'search-outline'}
+              size={17}
+              color={searchActive ? COLORS.cashOut : theme.textTertiary}
+            />
+          </TouchableOpacity>
+        </View>
+
+        {/* ── Book list — all rows inside ONE rounded card ── */}
+        {filteredBooks.length === 0 ? (
+          <View style={s.empty}>
+            <Ionicons name={searchQuery ? 'search-outline' : 'book-outline'} size={44} color={theme.textTertiary} />
+            <Text style={[s.emptyTitle, { color: theme.text }]}>
+              {searchQuery ? `No books matching "${searchQuery}"` : 'No books yet'}
+            </Text>
+            {!searchQuery && <Text style={[s.emptyBody, { color: theme.textSecondary }]}>Tap + to create your first book</Text>}
+          </View>
+        ) : (
+          // This single View IS the rounded card — all rows render inside it
+          <View style={[s.bookListCard, { backgroundColor: theme.surface }]}>
+            {filteredBooks.map((book, index) => {
+              const isPositive = (book.balance || 0) >= 0
+              const hasMembers = (book.member_count || 1) > 1
+              const isLast = index === filteredBooks.length - 1
+
+              return (
+                <View key={book.id}>
+                  <Pressable
+                    style={({ pressed }) => [s.row, pressed && { opacity: 0.82 }]}
+                    onPress={() => navigation.navigate('BookDetail', { bookId: book.id, bookName: book.name })}
+                  >
+                    {/* Icon */}
+                    <View style={[s.bookIconWrap, {
+                      backgroundColor: hasMembers ? COLORS.primaryLight : theme.surfaceSecondary,
+                    }]}>
+                      <Ionicons
+                        name={hasMembers ? 'people' : 'book'}
+                        size={20}
+                        color={hasMembers ? COLORS.primary : theme.textSecondary}
+                      />
+                    </View>
+
+                    {/* Name + meta */}
+                    <View style={s.rowMid}>
+                      <Text style={[s.rowName, { color: theme.text }]} numberOfLines={1}>{book.name}</Text>
+                      <Text style={[s.metaText, { color: theme.textTertiary }]}>
+                        {hasMembers ? `${book.member_count} Members · ` : ''}{book.currency}
+                      </Text>
+                    </View>
+
+                    {/* Balance */}
+                    <Text style={[s.rowBalance, { color: isPositive ? COLORS.cashIn : COLORS.cashOut }]}>
+                      {formatAmount(Math.abs(book.balance || 0), book.currency)}
+                    </Text>
+
+                    {/* Three-dot */}
+                    <TouchableOpacity
+                      onPress={() => handleThreeDot(book)}
+                      style={s.dotBtn}
+                      hitSlop={{ top: 14, bottom: 14, left: 10, right: 10 }}
+                    >
+                      <Ionicons name="ellipsis-vertical" size={18} color={theme.textTertiary} />
+                    </TouchableOpacity>
+                  </Pressable>
+
+                  {/* Separator between rows (not after last) */}
+                  {!isLast && (
+                    <View style={[s.rowSep, { backgroundColor: theme.border }]} />
+                  )}
+                </View>
+              )
+            })}
+          </View>
+        )}
+      </ScrollView>
 
       {/* FAB */}
       <TouchableOpacity
@@ -242,7 +245,7 @@ export default function HomeScreen({ navigation }: any) {
 const s = StyleSheet.create({
   container: { flex: 1 },
   loader: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  list: { paddingBottom: 100 },
+  scroll: { paddingBottom: 100 },
 
   // Top bar
   topBar: {
@@ -254,51 +257,72 @@ const s = StyleSheet.create({
   topIconBtn: { padding: 4 },
   avatarSmall: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   avatarSmallText: { color: COLORS.primary, fontWeight: '800', fontSize: FONT_SIZE.sm },
-  businessName: { fontSize: FONT_SIZE.md, fontWeight: '700', maxWidth: 200 },
+  businessName: { fontSize: FONT_SIZE.md, fontWeight: '700', maxWidth: 210 },
   businessSub: { fontSize: FONT_SIZE.xs, marginTop: 1 },
 
-  // Summary panel (like CashBook's balance section)
-  summaryPanel: { padding: SPACING.lg, borderBottomWidth: StyleSheet.hairlineWidth },
-  summaryMain: { marginBottom: SPACING.md },
+  // ── Summary card ─────────────────────────────────────────
+  summaryCard: {
+    marginHorizontal: SPACING.lg,
+    marginTop: SPACING.md,
+    marginBottom: SPACING.sm,
+    padding: SPACING.lg,
+    borderRadius: BORDER_RADIUS.lg,   // ← rounded corners, matches Settings
+    overflow: 'hidden',
+    ...SHADOW.sm,
+  },
   summaryLabel: { fontSize: FONT_SIZE.sm, marginBottom: 4 },
-  summaryBalance: { fontSize: 32, fontWeight: '800', letterSpacing: -0.5 },
+  summaryBalance: { fontSize: 32, fontWeight: '800', letterSpacing: -0.5, marginBottom: SPACING.md },
   summaryDivider: { height: StyleSheet.hairlineWidth, marginBottom: SPACING.md },
-  summaryRow: { flexDirection: 'row' },
+  summaryRow: { flexDirection: 'row', alignItems: 'center' },
   summaryItem: { flex: 1 },
   summaryItemLabel: { fontSize: FONT_SIZE.xs, marginBottom: 2 },
   summaryItemVal: { fontSize: FONT_SIZE.md, fontWeight: '700' },
+  summaryMidLine: { width: StyleSheet.hairlineWidth, height: 32, marginHorizontal: SPACING.lg },
 
   // Section header
   sectionRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: SPACING.lg, paddingVertical: SPACING.sm,
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: SPACING.lg, paddingVertical: SPACING.sm, minHeight: 40,
   },
-  sectionTitle: { fontSize: FONT_SIZE.sm, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8 },
-  sectionRight: { flexDirection: 'row', alignItems: 'center' },
+  sectionTitle: { flex: 1, fontSize: FONT_SIZE.xs, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.8 },
+  searchToggleBtn: { padding: 4, marginLeft: SPACING.sm },
+  searchBar: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', gap: SPACING.sm,
+    borderRadius: 20, borderWidth: 1, paddingHorizontal: SPACING.sm, height: 34,
+  },
+  searchInput: { flex: 1, fontSize: FONT_SIZE.sm, padding: 0 },
 
-  // Book row
+  // ── Book list card — ONE rounded card wrapping ALL rows ───
+  bookListCard: {
+    marginHorizontal: SPACING.lg,
+    marginBottom: SPACING.md,
+    borderRadius: BORDER_RADIUS.lg,   // ← same curve as Settings cards
+    overflow: 'hidden',
+    ...SHADOW.sm,
+  },
   row: {
     flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: SPACING.lg, paddingVertical: SPACING.md,
+    paddingHorizontal: SPACING.md, paddingVertical: 14,
   },
-  separator: { height: StyleSheet.hairlineWidth, marginLeft: SPACING.lg + 44 + SPACING.sm },
+  // Thin line between rows inside the card
+  rowSep: {
+    height: StyleSheet.hairlineWidth,
+    marginLeft: SPACING.md + 44 + SPACING.sm,  // indent to align with text
+  },
+
   bookIconWrap: {
     width: 44, height: 44, borderRadius: 22,
-    alignItems: 'center', justifyContent: 'center',
-    marginRight: SPACING.sm,
+    alignItems: 'center', justifyContent: 'center', marginRight: SPACING.sm,
   },
-  bookIconText: { color: COLORS.primary, fontWeight: '800', fontSize: FONT_SIZE.md },
   rowMid: { flex: 1 },
   rowName: { fontSize: FONT_SIZE.md, fontWeight: '600', marginBottom: 3 },
-  rowMeta: { flexDirection: 'row', alignItems: 'center' },
-  metaItem: { flexDirection: 'row', alignItems: 'center' },
   metaText: { fontSize: FONT_SIZE.xs },
   rowBalance: { fontSize: FONT_SIZE.md, fontWeight: '700', marginRight: SPACING.sm },
   dotBtn: { paddingLeft: SPACING.sm },
 
   // Empty
   empty: { alignItems: 'center', paddingTop: 60, gap: SPACING.sm, paddingHorizontal: SPACING.xl },
-  emptyTitle: { fontSize: FONT_SIZE.lg, fontWeight: '700', marginTop: SPACING.sm },
+  emptyTitle: { fontSize: FONT_SIZE.lg, fontWeight: '700', marginTop: SPACING.sm, textAlign: 'center' },
   emptyBody: { fontSize: FONT_SIZE.sm, textAlign: 'center' },
 
   // FAB

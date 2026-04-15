@@ -135,10 +135,19 @@ export default function AddEditEntryScreen({ route, navigation }: any) {
         showsVerticalScrollIndicator={false}
         bounces={false}
       >
-        {/* Header: title from navigation */}
-        <Text style={[s.screenTitle, { color: theme.text }]}>
-          {isEditing ? 'Edit Entry' : (isCashIn ? 'Add Cash In Entry' : 'Add Cash Out Entry')}
-        </Text>
+        {/* Header: back button + title */}
+        <View style={s.headerRow}>
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            style={s.backBtn}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="arrow-back" size={24} color={theme.text} />
+          </TouchableOpacity>
+          <Text style={[s.screenTitle, { color: theme.text }]}>
+            {isEditing ? 'Edit Entry' : (isCashIn ? 'Add Cash In Entry' : 'Add Cash Out Entry')}
+          </Text>
+        </View>
 
         {/* ── Date + Time row ────────────────────────────── */}
         <View style={s.dateTimeRow}>
@@ -194,7 +203,7 @@ export default function AddEditEntryScreen({ route, navigation }: any) {
             style={[
               s.typeBadge,
               { borderColor: theme.border, backgroundColor: theme.surface },
-              isCashIn && { borderColor: COLORS.cashIn, backgroundColor: '#1a2e1a' },
+              isCashIn && { borderColor: COLORS.cashIn, backgroundColor: COLORS.cashInDark },
             ]}
             onPress={() => setType('cash_in')}
             activeOpacity={0.8}
@@ -209,7 +218,7 @@ export default function AddEditEntryScreen({ route, navigation }: any) {
             style={[
               s.typeBadge,
               { borderColor: theme.border, backgroundColor: theme.surface },
-              !isCashIn && { borderColor: COLORS.cashOut, backgroundColor: '#2e1a1a' },
+              !isCashIn && { borderColor: COLORS.cashOut, backgroundColor: COLORS.cashOutDark },
             ]}
             onPress={() => setType('cash_out')}
             activeOpacity={0.8}
@@ -232,7 +241,6 @@ export default function AddEditEntryScreen({ route, navigation }: any) {
             multiline
             maxLength={200}
           />
-          <Ionicons name="mic-outline" size={20} color={theme.textTertiary} style={s.micIcon} />
         </View>
 
       </ScrollView>
@@ -320,13 +328,15 @@ const s = StyleSheet.create({
   safe: { flex: 1 },
   scroll: { padding: SPACING.lg, paddingBottom: 16 },
 
-  screenTitle: { fontSize: FONT_SIZE.lg, fontWeight: '700', marginBottom: SPACING.lg },
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginBottom: SPACING.lg },
+  backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  screenTitle: { fontSize: FONT_SIZE.lg, fontWeight: '700', flex: 1 },
 
   // Date + Time row
   dateTimeRow: { flexDirection: 'row', gap: SPACING.sm, marginBottom: SPACING.lg },
   dateTimePicker: {
     flex: 1, flexDirection: 'row', alignItems: 'center', gap: SPACING.sm,
-    borderRadius: BORDER_RADIUS.sm, borderWidth: 1,
+    borderRadius: BORDER_RADIUS.md, borderWidth: 1,
     padding: SPACING.sm,
   },
   dateTimeLabel: { fontSize: 10, fontWeight: '600' },
@@ -334,7 +344,7 @@ const s = StyleSheet.create({
 
   // Amount
   amountWrap: {
-    borderWidth: 1.5, borderRadius: BORDER_RADIUS.sm,
+    borderWidth: 1.5, borderRadius: BORDER_RADIUS.lg,
     padding: SPACING.md, marginBottom: SPACING.md,
   },
   amountFieldLabel: { fontSize: FONT_SIZE.xs, marginBottom: SPACING.sm },
@@ -353,13 +363,12 @@ const s = StyleSheet.create({
 
   // Remark
   inputWrap: {
-    borderWidth: 1, borderRadius: BORDER_RADIUS.sm,
+    borderWidth: 1, borderRadius: BORDER_RADIUS.lg,
     paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm,
     flexDirection: 'row', alignItems: 'flex-start',
     marginBottom: SPACING.md, minHeight: 56,
   },
   remarkInput: { flex: 1, fontSize: FONT_SIZE.md, paddingTop: 4 },
-  micIcon: { marginTop: 4 },
 
   // Bottom bar
   bottomBar: {
@@ -368,12 +377,12 @@ const s = StyleSheet.create({
   },
   saveNewBtn: {
     flex: 1, paddingVertical: 14, alignItems: 'center', justifyContent: 'center',
-    borderRadius: BORDER_RADIUS.sm, borderWidth: 1.5,
+    borderRadius: BORDER_RADIUS.lg, borderWidth: 1.5,
   },
   saveNewText: { fontSize: FONT_SIZE.sm, fontWeight: '700', letterSpacing: 0.5 },
   saveBtn: {
     flex: 1, paddingVertical: 14, alignItems: 'center', justifyContent: 'center',
-    borderRadius: BORDER_RADIUS.sm,
+    borderRadius: BORDER_RADIUS.lg,
   },
   saveBtnText: { fontSize: FONT_SIZE.sm, fontWeight: '700', color: '#fff', letterSpacing: 0.5 },
 
