@@ -1,13 +1,14 @@
 // src/screens/PrivacyPolicyScreen.tsx
 import React from 'react'
-import { ScrollView, Text, View, StyleSheet, TouchableOpacity, Linking, Image } from 'react-native'
+import { ScrollView, Text, View, StyleSheet, TouchableOpacity, Linking } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
+import AppLogo from '../components/common/AppLogo'
 import { useThemeStore, getTheme } from '../store/themeStore'
 import { SPACING, FONT_SIZE, COLORS } from '../constants'
 
 const CONTACT_EMAIL = 'aakashsharma9855@gmail.com'
-const LAST_UPDATED = 'April 2025'
+const LAST_UPDATED = 'April 2026'
 
 const sections = [
     {
@@ -54,10 +55,7 @@ export default function PrivacyPolicyScreen() {
 
                 {/* Logo header */}
                 <View style={[s.logoHeader, { backgroundColor: COLORS.primaryLight }]}>
-                    <Image
-                        source={require('../../assets/icon.png')}
-                        style={{ width: 45, height: 45 }}
-                    />
+                    <AppLogo size={64} />
                     <Text style={[s.logoAppName, { color: COLORS.primary }]}>CashFlow</Text>
                     <Text style={[s.pageTitle, { color: COLORS.primary }]}>Privacy Policy</Text>
                     <Text style={[s.lastUpdated, { color: COLORS.primary }]}>Last updated: {LAST_UPDATED}</Text>
@@ -99,8 +97,6 @@ const s = StyleSheet.create({
         marginBottom: SPACING.lg, marginHorizontal: SPACING.lg,
         marginTop: SPACING.lg, borderRadius: 18,
     },
-    logoCircle: { width: 64, height: 64, borderRadius: 18, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center', marginBottom: SPACING.sm },
-    logoEmoji: { fontSize: 32 },
     logoAppName: { fontSize: FONT_SIZE.sm, fontWeight: '800', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 4 },
     pageTitle: { fontSize: FONT_SIZE.xl, fontWeight: '800', marginBottom: 4 },
     lastUpdated: { fontSize: FONT_SIZE.xs, opacity: 0.7 },

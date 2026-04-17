@@ -7,7 +7,7 @@ import { useThemeStore, getTheme } from '../store/themeStore'
 import { SPACING, FONT_SIZE, COLORS } from '../constants'
 
 const CONTACT_EMAIL = 'aakashsharma9855@gmail.com'
-const LAST_UPDATED = 'April 2025'
+const LAST_UPDATED = 'April 2026'
 
 const sections = [
     {

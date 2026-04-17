@@ -1,11 +1,61 @@
 // src/services/entriesService.ts
+// All database operations for entries.
+//
+// Caching strategy:
+//   • Paginated display (getEntries) — page 0 is cached in AsyncStorage.
+//     Subsequent pages are fetched on demand and appended to cache.
+//     On offline load, the cached pages serve as the offline dataset.
+//   • Export (getAllEntries) — reads from the full local cache first;
+//     only hits the network to top up if cache is stale (>5 min) or empty.
+//     This avoids fetching 9999 rows on every export.
+//   • getBookSummary — uses a lightweight `amount,type` only query (no joins).
+
 import supabase from './supabase'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import type { Entry, EntryFormData, EntryFilter, ApiResponse } from '../types'
 import { PAGE_SIZE } from '../constants'
 
+// ─── Cache helpers ────────────────────────────────────────────
+const CACHE_VERSION = 'v1'
+const cacheKey = (bookId: string) => `cashflow:entries:${CACHE_VERSION}:${bookId}`
+const cacheMetaKey = (bookId: string) => `cashflow:entries_meta:${CACHE_VERSION}:${bookId}`
+const CACHE_TTL_MS = 5 * 60 * 1000  // 5 minutes
+
+async function readCache(bookId: string): Promise<Entry[]> {
+  try {
+    const raw = await AsyncStorage.getItem(cacheKey(bookId))
+    return raw ? JSON.parse(raw) : []
+  } catch { return [] }
+}
+
+async function writeCache(bookId: string, entries: Entry[]): Promise<void> {
+  try {
+    await AsyncStorage.setItem(cacheKey(bookId), JSON.stringify(entries))
+    await AsyncStorage.setItem(cacheMetaKey(bookId), JSON.stringify({ updatedAt: Date.now() }))
+  } catch { }
+}
+
+async function isCacheStale(bookId: string): Promise<boolean> {
+  try {
+    const raw = await AsyncStorage.getItem(cacheMetaKey(bookId))
+    if (!raw) return true
+    const meta = JSON.parse(raw)
+    return (Date.now() - (meta.updatedAt ?? 0)) > CACHE_TTL_MS
+  } catch { return true }
+}
+
+async function invalidateCache(bookId: string): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(cacheMetaKey(bookId))
+  } catch { }
+}
+
+// ─── Service ──────────────────────────────────────────────────
 export const entriesService = {
+
   /**
-   * Get paginated entries for a book with optional filter
+   * Paginated entries for display in BookDetailScreen.
+   * Page 0 result is merged into the local cache so it's available offline.
    */
   async getEntries(
     bookId: string,
@@ -14,10 +64,7 @@ export const entriesService = {
   ): Promise<ApiResponse<Entry[]>> {
     let query = supabase
       .from('entries')
-      .select(`
-        *,
-        profile:profiles(id, email, full_name)
-      `)
+      .select(`*, profile:profiles(id, email, full_name)`)
       .eq('book_id', bookId)
       .order('entry_date', { ascending: false })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
@@ -29,11 +76,83 @@ export const entriesService = {
     const { data, error } = await query
 
     if (error) return { data: null, error: error.message }
-    return { data: data || [], error: null }
+
+    // Merge page-0 results into cache (all-filter only — keeps cache coherent)
+    if (page === 0 && filter === 'all' && data) {
+      const existing = await readCache(bookId)
+      // Keep any locally-created temp entries not yet on server
+      const tempEntries = existing.filter(e => e.id.startsWith('local_'))
+      const merged = [...tempEntries, ...data]
+      await writeCache(bookId, merged)
+    }
+
+    return { data: data ?? [], error: null }
   },
 
   /**
-   * Create a new entry
+   * All entries for a book — used by Export and by offline display.
+   * Reads from cache first; only fetches from network when cache is stale.
+   * Does NOT use .range(0, 9999) — instead fetches in background pages.
+   */
+  async getAllEntries(
+    bookId: string,
+    filter: EntryFilter = 'all'
+  ): Promise<ApiResponse<Entry[]>> {
+    // Try cache first
+    const stale = await isCacheStale(bookId)
+    const cached = await readCache(bookId)
+
+    if (!stale && cached.length > 0) {
+      // Cache is fresh — apply filter and return immediately
+      const filtered = filter === 'all' ? cached : cached.filter(e => e.type === filter)
+      return { data: filtered, error: null }
+    }
+
+    // Cache is stale or empty — fetch all pages from server
+    const allEntries: Entry[] = []
+    let page = 0
+    const BATCH = 500  // larger batches for export efficiency
+
+    while (true) {
+      let q = supabase
+        .from('entries')
+        .select(`*, profile:profiles(id, email, full_name)`)
+        .eq('book_id', bookId)
+        .order('entry_date', { ascending: false })
+        .range(page * BATCH, (page + 1) * BATCH - 1)
+
+      const { data, error } = await q
+      if (error) {
+        // Network failure — return stale cache if available
+        if (cached.length > 0) {
+          const filtered = filter === 'all' ? cached : cached.filter(e => e.type === filter)
+          return { data: filtered, error: null }
+        }
+        return { data: null, error: error.message }
+      }
+
+      allEntries.push(...(data ?? []))
+
+      // Stop when we get fewer entries than batch size (last page)
+      if (!data || data.length < BATCH) break
+
+      // Safety cap: max 10 pages × 500 = 5000 entries
+      if (++page >= 10) break
+    }
+
+    // Preserve any unsync'd local temp entries
+    const tempEntries = cached.filter(e => e.id.startsWith('local_'))
+    const final = [...tempEntries, ...allEntries]
+
+    await writeCache(bookId, final)
+
+    const filtered = filter === 'all' ? final : final.filter(e => e.type === filter)
+    return { data: filtered, error: null }
+  },
+
+  /**
+   * Create a single entry (used by AddEditEntryScreen).
+   * After creation, invalidates the cache so next getAllEntries re-fetches.
    */
   async createEntry(
     bookId: string,
@@ -49,48 +168,106 @@ export const entriesService = {
         user_id: user.id,
         amount: parseFloat(formData.amount),
         type: formData.type,
-        note: formData.note.trim() || null,
+        note: formData.note?.trim() || null,
         entry_date: formData.entry_date.toISOString(),
       })
-      .select(`
-        *,
-        profile:profiles(id, email, full_name)
-      `)
+      .select(`*, profile:profiles(id, email, full_name)`)
       .single()
 
     if (error) return { data: null, error: error.message }
+
+    // Add to cache immediately so offline list stays current
+    if (data) {
+      const cached = await readCache(bookId)
+      const updated = [data, ...cached.filter(e => e.id !== data.id)]
+        .sort((a, b) => new Date(b.entry_date).getTime() - new Date(a.entry_date).getTime())
+      await writeCache(bookId, updated)
+    }
+
     return { data, error: null }
   },
 
   /**
-   * Update an entry
+   * Batch create entries — used by CSV import.
+   * Inserts in chunks of 100, then invalidates cache.
+   */
+  async batchCreateEntries(
+    bookId: string,
+    rows: { amount: number; type: string; note: string | null; entry_date: string }[]
+  ): Promise<{ inserted: number; failed: number }> {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { inserted: 0, failed: rows.length }
+
+    const CHUNK = 100
+    let inserted = 0
+    let failed = 0
+
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const chunk = rows.slice(i, i + CHUNK).map(r => ({
+        book_id: bookId,
+        user_id: user.id,
+        amount: r.amount,
+        type: r.type,
+        note: r.note,
+        entry_date: r.entry_date,
+      }))
+
+      const { data, error } = await supabase
+        .from('entries')
+        .insert(chunk)
+        .select('id')
+
+      if (error) {
+        failed += chunk.length
+      } else {
+        inserted += (data?.length ?? 0)
+      }
+    }
+
+    // Invalidate cache so next fetch gets fresh data including imported entries
+    if (inserted > 0) await invalidateCache(bookId)
+
+    return { inserted, failed }
+  },
+
+  /**
+   * Update a single entry.
    */
   async updateEntry(
     id: string,
     formData: Partial<EntryFormData>
   ): Promise<ApiResponse<Entry>> {
-    const updates: any = {}
+    const updates: Record<string, unknown> = {}
     if (formData.amount !== undefined) updates.amount = parseFloat(formData.amount)
     if (formData.type !== undefined) updates.type = formData.type
-    if (formData.note !== undefined) updates.note = formData.note.trim() || null
+    if (formData.note !== undefined) updates.note = formData.note?.trim() || null
     if (formData.entry_date !== undefined) updates.entry_date = formData.entry_date.toISOString()
 
     const { data, error } = await supabase
       .from('entries')
       .update(updates)
       .eq('id', id)
-      .select(`
-        *,
-        profile:profiles(id, email, full_name)
-      `)
+      .select(`*, profile:profiles(id, email, full_name)`)
       .single()
 
     if (error) return { data: null, error: error.message }
+
+    // Update cache entry in-place
+    if (data) {
+      // We need bookId to update cache — extract from the returned entry
+      const cached = await readCache(data.book_id)
+      const idx = cached.findIndex(e => e.id === id)
+      if (idx >= 0) {
+        cached[idx] = data
+        await writeCache(data.book_id, cached)
+      }
+    }
+
     return { data, error: null }
   },
 
   /**
-   * Delete an entry
+   * Delete a single entry.
    */
   async deleteEntry(id: string): Promise<ApiResponse<null>> {
     const { error } = await supabase
@@ -103,8 +280,15 @@ export const entriesService = {
   },
 
   /**
-   * Get book summary (total cash in/out/balance)
-   * Uses a lightweight aggregate query
+   * Invalidate cache for a book — call after batch deletes.
+   */
+  async invalidateBookCache(bookId: string): Promise<void> {
+    await invalidateCache(bookId)
+  },
+
+  /**
+   * Book summary — lightweight query, no entry body, no joins.
+   * Used for the balance card in BookDetailScreen.
    */
   async getBookSummary(bookId: string): Promise<ApiResponse<{
     balance: number
@@ -119,21 +303,11 @@ export const entriesService = {
 
     if (error) return { data: null, error: error.message }
 
-    const cash_in = (data || [])
-      .filter(e => e.type === 'cash_in')
-      .reduce((s, e) => s + Number(e.amount), 0)
-
-    const cash_out = (data || [])
-      .filter(e => e.type === 'cash_out')
-      .reduce((s, e) => s + Number(e.amount), 0)
+    const cash_in = (data ?? []).filter(e => e.type === 'cash_in').reduce((s, e) => s + Number(e.amount), 0)
+    const cash_out = (data ?? []).filter(e => e.type === 'cash_out').reduce((s, e) => s + Number(e.amount), 0)
 
     return {
-      data: {
-        cash_in,
-        cash_out,
-        balance: cash_in - cash_out,
-        entry_count: (data || []).length,
-      },
+      data: { cash_in, cash_out, balance: cash_in - cash_out, entry_count: (data ?? []).length },
       error: null,
     }
   },

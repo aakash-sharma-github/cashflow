@@ -279,9 +279,6 @@ export default function SettingsScreen({ navigation }: any) {
                     <Text style={[styles.madeWithText, { color: theme.textTertiary }]}>
                         Made with ❤️ by Aakash Sharma
                     </Text>
-                    <Text style={[styles.madeWithSub, { color: theme.textTertiary }]}>
-                        CashFlow v{APP_VERSION}
-                    </Text>
                 </View>
 
                 <View style={{ height: SPACING.xl }} />

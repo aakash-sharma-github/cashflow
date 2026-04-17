@@ -7,13 +7,15 @@ import { format, formatDistanceToNow, isToday, isYesterday } from 'date-fns'
 export function formatAmount(amount: number, currency = 'USD'): string {
   const currencySymbols: Record<string, string> = {
     USD: '$', EUR: '€', GBP: '£', INR: '₹',
-    AED: 'د.إ', SAR: '﷼', NPR: 'रू', BDT: '৳',
+    AED: 'د.إ', SAR: '﷼', NPR: 'रु', BDT: '৳',
   }
   const symbol = currencySymbols[currency] || currency
-  const formatted = Math.abs(amount).toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })
+  // No trailing zeros unless user entered decimals
+  // e.g. 500 → "500", 500.5 → "500.5", 500.50 → "500.5"
+  const abs = Math.abs(amount)
+  const formatted = Number.isInteger(abs)
+    ? abs.toLocaleString('en-US')
+    : abs.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
   return `${symbol}${formatted}`
 }
 

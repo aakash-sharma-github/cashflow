@@ -33,28 +33,54 @@ export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
 
   initialize: async () => {
-    // Hard timeout — if everything hangs, unblock the app after 8 seconds
+    // Hard timeout — unblock app after 8 seconds if something hangs
     const timeout = setTimeout(() => {
-      console.warn('[Auth] initialize() timed out — forcing isLoading=false')
       set({ user: null, isAuthenticated: false, isLoading: false })
     }, 8000)
 
     try {
+      // Step 1: Check if we have a local session (works offline — session is
+      // stored in SecureStore by the Supabase client)
       const session = await authService.getSession()
+
       if (session) {
+        // Step 2: Try to load profile (uses cache fallback when offline)
         const { data: profile } = await authService.getProfile()
-        set({ user: profile, isAuthenticated: !!profile, isLoading: false })
+        if (profile) {
+          // Authenticated — either from network or local cache
+          set({ user: profile, isAuthenticated: true, isLoading: false })
+        } else {
+          // Session exists but no profile (rare) — check cache directly
+          const cached = await authService.getCachedProfile()
+          if (cached) {
+            set({ user: cached, isAuthenticated: true, isLoading: false })
+          } else {
+            // No profile anywhere — treat as not authenticated
+            set({ user: null, isAuthenticated: false, isLoading: false })
+          }
+        }
       } else {
+        // No local session at all — must log in
         set({ user: null, isAuthenticated: false, isLoading: false })
       }
     } catch (e) {
-      console.warn('[Auth] initialize error:', e)
-      set({ user: null, isAuthenticated: false, isLoading: false })
+      // If getSession() itself throws (should be rare — it reads from SecureStore),
+      // fall back to the cached profile to avoid logging the user out offline
+      try {
+        const cached = await authService.getCachedProfile()
+        if (cached) {
+          set({ user: cached, isAuthenticated: true, isLoading: false })
+        } else {
+          set({ user: null, isAuthenticated: false, isLoading: false })
+        }
+      } catch {
+        set({ user: null, isAuthenticated: false, isLoading: false })
+      }
     } finally {
       clearTimeout(timeout)
     }
 
-    // Auth state listener — registered after initial load, always active
+    // Auth state listener — handles sign-in events (online) and explicit sign-out
     authService.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session) {
         setTimeout(async () => {
@@ -62,10 +88,12 @@ export const useAuthStore = create<AuthState>((set) => ({
             const { data: profile } = await authService.getProfile()
             set({ user: profile, isAuthenticated: true, isLoading: false })
           } catch {
+            // Online sign-in but profile fetch failed — keep authenticated
             set({ isAuthenticated: true, isLoading: false })
           }
         }, 500)
       } else if (event === 'SIGNED_OUT') {
+        // Only log out on EXPLICIT sign-out — not on network loss
         set({ user: null, isAuthenticated: false, isLoading: false })
       } else if (event === 'TOKEN_REFRESHED') {
         // Silently refresh — no navigation change needed
