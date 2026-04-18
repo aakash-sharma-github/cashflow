@@ -1,18 +1,10 @@
-// metro.config.js
-// Safe Metro configuration for CashFlow.
-//
-// IMPORTANT: Keep this minimal. The previous version added aggressive
-// minifier overrides (mangle: { toplevel: true }) which caused React Native
-// to fail finding modules by name at runtime — contributing to the crash.
-//
-// Size optimisations are handled at the native level via ProGuard (app.json).
-// The JS bundle is minified by Metro's default minifier during production builds.
-
+// metro.config.js — Production Metro configuration
+// Safe and minimal — no aggressive overrides that cause runtime crashes
 const { getDefaultConfig } = require('expo/metro-config')
 
 const config = getDefaultConfig(__dirname)
 
-// Block test files from being bundled (safe, no runtime impact)
+// Block test files from the bundle (zero runtime impact)
 config.resolver = {
   ...config.resolver,
   blockList: [
@@ -22,8 +14,17 @@ config.resolver = {
   ],
 }
 
-// Do NOT override transformer.minifierConfig — Metro's defaults are safe.
-// Custom mangle settings can rename React Native internal references
-// that are resolved via string lookups at runtime.
+// Enable inline requires for faster app startup.
+// Modules only load when first used instead of all at boot.
+// This is safe and recommended by Meta for production React Native apps.
+config.transformer = {
+  ...config.transformer,
+  getTransformOptions: async () => ({
+    transform: {
+      experimentalImportSupport: false,
+      inlineRequires: true,          // ← defers module loading to first use
+    },
+  }),
+}
 
 module.exports = config
