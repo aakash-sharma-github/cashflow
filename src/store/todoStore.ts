@@ -1,6 +1,7 @@
 // src/store/todoStore.ts
 // Offline-only todo store. All data lives in AsyncStorage on-device.
-// No server sync — todos are personal and private.
+// Supports: priority, due date, reminder time, notes.
+// Reminder scheduling is handled by the caller (TodoScreen) using notificationService.
 
 import { create } from 'zustand'
 import AsyncStorage from '@react-native-async-storage/async-storage'
@@ -15,7 +16,10 @@ export interface Todo {
     priority: Priority
     createdAt: string
     completedAt: string | null
-    dueDate: string | null      // ISO date string or null
+    dueDate: string | null    // ISO date for the due date badge
+    reminderDate: string | null    // ISO datetime for push notification
+    reminderNoteId: string | null    // expo notification ID for the 5-min warning
+    reminderDueId: string | null    // expo notification ID for the "still pending" alert
     notes: string | null
 }
 
@@ -25,30 +29,22 @@ interface TodoState {
     searchQuery: string
     isLoaded: boolean
 
-    // Actions
     load: () => Promise<void>
-    addTodo: (text: string, priority?: Priority, dueDate?: string | null) => Promise<void>
+    addTodo: (text: string, priority?: Priority, dueDate?: string | null, reminderDate?: string | null) => Promise<Todo>
     toggleTodo: (id: string) => Promise<void>
-    updateTodo: (id: string, updates: Partial<Pick<Todo, 'text' | 'priority' | 'dueDate' | 'notes'>>) => Promise<void>
+    updateTodo: (id: string, updates: Partial<Pick<Todo, 'text' | 'priority' | 'dueDate' | 'reminderDate' | 'reminderNoteId' | 'reminderDueId' | 'notes'>>) => Promise<void>
     deleteTodo: (id: string) => Promise<void>
     clearCompleted: () => Promise<void>
-    reorderTodos: (from: number, to: number) => Promise<void>
     setFilter: (f: FilterMode) => void
     setSearchQuery: (q: string) => void
-
-    // Computed selectors (return values, not state)
     filteredTodos: () => Todo[]
     stats: () => { total: number; completed: number; active: number; high: number }
 }
 
-const STORAGE_KEY = 'cashflow:todos'
+const STORAGE_KEY = 'cashflow:todos_v2'
 
 async function persist(todos: Todo[]) {
-    try {
-        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(todos))
-    } catch (e) {
-        console.warn('[Todos] persist failed:', e)
-    }
+    try { await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(todos)) } catch { }
 }
 
 function genId() {
@@ -56,35 +52,36 @@ function genId() {
 }
 
 export const useTodoStore = create<TodoState>((set, get) => ({
-    todos: [],
-    filter: 'all',
-    searchQuery: '',
-    isLoaded: false,
+    todos: [], filter: 'all', searchQuery: '', isLoaded: false,
 
     load: async () => {
         try {
-            const raw = await AsyncStorage.getItem(STORAGE_KEY)
+            // Try new key first, fall back to old key for migration
+            let raw = await AsyncStorage.getItem(STORAGE_KEY)
+            if (!raw) raw = await AsyncStorage.getItem('cashflow:todos')
             const todos: Todo[] = raw ? JSON.parse(raw) : []
-            set({ todos, isLoaded: true })
+            // Migrate: add reminderDate/reminderNoteId/reminderDueId if missing
+            const migrated = todos.map(t => ({
+                reminderDate: null, reminderNoteId: null, reminderDueId: null,
+                ...t,
+            }))
+            set({ todos: migrated, isLoaded: true })
+            if (raw) await persist(migrated) // save migrated version
         } catch {
             set({ isLoaded: true })
         }
     },
 
-    addTodo: async (text, priority = 'medium', dueDate = null) => {
+    addTodo: async (text, priority = 'medium', dueDate = null, reminderDate = null) => {
         const todo: Todo = {
-            id: genId(),
-            text: text.trim(),
-            completed: false,
-            priority,
-            createdAt: new Date().toISOString(),
-            completedAt: null,
-            dueDate,
-            notes: null,
+            id: genId(), text: text.trim(), completed: false, priority,
+            createdAt: new Date().toISOString(), completedAt: null,
+            dueDate, reminderDate, reminderNoteId: null, reminderDueId: null, notes: null,
         }
         const next = [todo, ...get().todos]
         set({ todos: next })
         await persist(next)
+        return todo
     },
 
     toggleTodo: async (id) => {
@@ -115,14 +112,6 @@ export const useTodoStore = create<TodoState>((set, get) => ({
         await persist(next)
     },
 
-    reorderTodos: async (from, to) => {
-        const arr = [...get().todos]
-        const [item] = arr.splice(from, 1)
-        arr.splice(to, 0, item)
-        set({ todos: arr })
-        await persist(arr)
-    },
-
     setFilter: (filter) => set({ filter }),
     setSearchQuery: (searchQuery) => set({ searchQuery }),
 
@@ -130,26 +119,25 @@ export const useTodoStore = create<TodoState>((set, get) => ({
         const { todos, filter, searchQuery } = get()
         let result = todos
         if (filter === 'active') result = result.filter(t => !t.completed)
-        else if (filter === 'completed') result = result.filter(t => t.completed)
+        if (filter === 'completed') result = result.filter(t => t.completed)
         if (searchQuery.trim()) {
             const q = searchQuery.toLowerCase()
-            result = result.filter(t => t.text.toLowerCase().includes(q))
+            result = result.filter(t => t.text.toLowerCase().includes(q) || (t.notes ?? '').toLowerCase().includes(q))
         }
-        // Sort: incomplete high → medium → low, then completed last
         return result.sort((a, b) => {
             if (a.completed !== b.completed) return a.completed ? 1 : -1
-            const pOrder = { high: 0, medium: 1, low: 2 }
-            return pOrder[a.priority] - pOrder[b.priority]
+            const p = { high: 0, medium: 1, low: 2 }
+            return p[a.priority] - p[b.priority]
         })
     },
 
     stats: () => {
-        const todos = get().todos
+        const t = get().todos
         return {
-            total: todos.length,
-            completed: todos.filter(t => t.completed).length,
-            active: todos.filter(t => !t.completed).length,
-            high: todos.filter(t => t.priority === 'high' && !t.completed).length,
+            total: t.length,
+            completed: t.filter(x => x.completed).length,
+            active: t.filter(x => !x.completed).length,
+            high: t.filter(x => x.priority === 'high' && !x.completed).length,
         }
     },
 }))

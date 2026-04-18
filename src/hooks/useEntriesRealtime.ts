@@ -4,6 +4,8 @@ import supabase from '../services/supabase'
 import { useEntriesStore } from '../store/entriesStore'
 import { useBooksStore } from '../store/booksStore'
 import type { Entry } from '../types'
+import { notificationService } from '../services/notificationService'
+import { formatAmount } from '../utils'
 
 /**
  * Subscribes to real-time changes for entries in a specific book.
@@ -38,8 +40,18 @@ export function useEntriesRealtime(bookId: string) {
             .eq('id', payload.new.id)
             .single()
 
-          if (data) addEntry(data as Entry)
-          fetchBook(bookId) // refresh balance
+          if (data) {
+            addEntry(data as Entry)
+            // Notify other collaborators about the new entry
+            const amt = formatAmount(data.amount)
+            notificationService.sendEntryAddedNotification(
+              '', // book name not available here — caller passes it
+              amt,
+              data.type,
+              data.note ?? undefined
+            )
+          }
+          fetchBook(bookId)
         }
       )
       .on(
@@ -57,7 +69,10 @@ export function useEntriesRealtime(bookId: string) {
             .eq('id', payload.new.id)
             .single()
 
-          if (data) updateEntry(data as Entry)
+          if (data) {
+            updateEntry(data as Entry)
+            notificationService.sendEntryEditedNotification('', formatAmount(data.amount))
+          }
           fetchBook(bookId)
         }
       )
@@ -71,6 +86,7 @@ export function useEntriesRealtime(bookId: string) {
         },
         (payload) => {
           removeEntry(payload.old.id)
+          notificationService.sendEntryDeletedNotification('')
           fetchBook(bookId)
         }
       )
