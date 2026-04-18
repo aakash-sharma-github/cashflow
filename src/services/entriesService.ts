@@ -16,38 +16,62 @@ import type { Entry, EntryFormData, EntryFilter, ApiResponse } from '../types'
 import { PAGE_SIZE } from '../constants'
 
 // ─── Cache helpers ────────────────────────────────────────────
-const CACHE_VERSION = 'v1'
-const cacheKey = (bookId: string) => `cashflow:entries:${CACHE_VERSION}:${bookId}`
-const cacheMetaKey = (bookId: string) => `cashflow:entries_meta:${CACHE_VERSION}:${bookId}`
-const CACHE_TTL_MS = 5 * 60 * 1000  // 5 minutes
+// TWO separate caches prevent the "export returns only 30 entries" bug:
+//
+//   displayCacheKey → written ONLY by getEntries(page=0)
+//                     holds the latest 30 entries for offline display
+//
+//   fullCacheKey    → written ONLY by getAllEntries
+//                     holds ALL entries; used exclusively for export
+//
+// If both used the same key, getAllEntries would find a fresh 30-entry
+// display cache and return only 30 entries — exactly the bug being fixed.
 
-async function readCache(bookId: string): Promise<Entry[]> {
+const CACHE_V = 'v2'
+
+// Display cache — page-0 only, 30 entries max
+const displayCacheKey = (b: string) => `cashflow:entries_display:${CACHE_V}:${b}`
+
+// Full export cache — all entries
+const fullCacheKey = (b: string) => `cashflow:entries_full:${CACHE_V}:${b}`
+const fullCacheMetaKey = (b: string) => `cashflow:entries_full_meta:${CACHE_V}:${b}`
+const FULL_CACHE_TTL_MS = 5 * 60 * 1000  // 5 minutes
+
+async function readDisplayCache(bookId: string): Promise<Entry[]> {
   try {
-    const raw = await AsyncStorage.getItem(cacheKey(bookId))
+    const raw = await AsyncStorage.getItem(displayCacheKey(bookId))
     return raw ? JSON.parse(raw) : []
   } catch { return [] }
 }
 
-async function writeCache(bookId: string, entries: Entry[]): Promise<void> {
+async function writeDisplayCache(bookId: string, entries: Entry[]): Promise<void> {
+  try { await AsyncStorage.setItem(displayCacheKey(bookId), JSON.stringify(entries)) } catch { }
+}
+
+async function readFullCache(bookId: string): Promise<Entry[]> {
   try {
-    await AsyncStorage.setItem(cacheKey(bookId), JSON.stringify(entries))
-    await AsyncStorage.setItem(cacheMetaKey(bookId), JSON.stringify({ updatedAt: Date.now() }))
+    const raw = await AsyncStorage.getItem(fullCacheKey(bookId))
+    return raw ? JSON.parse(raw) : []
+  } catch { return [] }
+}
+
+async function writeFullCache(bookId: string, entries: Entry[]): Promise<void> {
+  try {
+    await AsyncStorage.setItem(fullCacheKey(bookId), JSON.stringify(entries))
+    await AsyncStorage.setItem(fullCacheMetaKey(bookId), JSON.stringify({ updatedAt: Date.now() }))
   } catch { }
 }
 
-async function isCacheStale(bookId: string): Promise<boolean> {
+async function isFullCacheStale(bookId: string): Promise<boolean> {
   try {
-    const raw = await AsyncStorage.getItem(cacheMetaKey(bookId))
+    const raw = await AsyncStorage.getItem(fullCacheMetaKey(bookId))
     if (!raw) return true
-    const meta = JSON.parse(raw)
-    return (Date.now() - (meta.updatedAt ?? 0)) > CACHE_TTL_MS
+    return (Date.now() - (JSON.parse(raw).updatedAt ?? 0)) > FULL_CACHE_TTL_MS
   } catch { return true }
 }
 
 async function invalidateCache(bookId: string): Promise<void> {
-  try {
-    await AsyncStorage.removeItem(cacheMetaKey(bookId))
-  } catch { }
+  try { await AsyncStorage.removeItem(fullCacheMetaKey(bookId)) } catch { }
 }
 
 // ─── Service ──────────────────────────────────────────────────
@@ -77,13 +101,12 @@ export const entriesService = {
 
     if (error) return { data: null, error: error.message }
 
-    // Merge page-0 results into cache (all-filter only — keeps cache coherent)
+    // Write page-0 to DISPLAY cache only — keeps latest entries available offline
+    // Does NOT write to the full/export cache to avoid the 30-entry export bug
     if (page === 0 && filter === 'all' && data) {
-      const existing = await readCache(bookId)
-      // Keep any locally-created temp entries not yet on server
+      const existing = await readDisplayCache(bookId)
       const tempEntries = existing.filter(e => e.id.startsWith('local_'))
-      const merged = [...tempEntries, ...data]
-      await writeCache(bookId, merged)
+      await writeDisplayCache(bookId, [...tempEntries, ...data])
     }
 
     return { data: data ?? [], error: null }
@@ -98,9 +121,8 @@ export const entriesService = {
     bookId: string,
     filter: EntryFilter = 'all'
   ): Promise<ApiResponse<Entry[]>> {
-    // Try cache first
-    const stale = await isCacheStale(bookId)
-    const cached = await readCache(bookId)
+    const stale = await isFullCacheStale(bookId)
+    const cached = await readFullCache(bookId)
 
     if (!stale && cached.length > 0) {
       // Cache is fresh — apply filter and return immediately
@@ -108,7 +130,7 @@ export const entriesService = {
       return { data: filtered, error: null }
     }
 
-    // Cache is stale or empty — fetch all pages from server
+    // Full cache is stale or empty — fetch all pages from server
     const allEntries: Entry[] = []
     let page = 0
     const BATCH = 500  // larger batches for export efficiency
@@ -124,8 +146,9 @@ export const entriesService = {
       const { data, error } = await q
       if (error) {
         // Network failure — return stale cache if available
-        if (cached.length > 0) {
-          const filtered = filter === 'all' ? cached : cached.filter(e => e.type === filter)
+        const staleCached = await readFullCache(bookId)
+        if (staleCached.length > 0) {
+          const filtered = filter === 'all' ? staleCached : staleCached.filter(e => e.type === filter)
           return { data: filtered, error: null }
         }
         return { data: null, error: error.message }
@@ -144,7 +167,7 @@ export const entriesService = {
     const tempEntries = cached.filter(e => e.id.startsWith('local_'))
     const final = [...tempEntries, ...allEntries]
 
-    await writeCache(bookId, final)
+    await writeFullCache(bookId, final)
 
     const filtered = filter === 'all' ? final : final.filter(e => e.type === filter)
     return { data: filtered, error: null }
@@ -176,12 +199,14 @@ export const entriesService = {
 
     if (error) return { data: null, error: error.message }
 
-    // Add to cache immediately so offline list stays current
+    // Update display cache immediately so offline list stays current
+    // Also invalidate full cache so next export re-fetches fresh data
     if (data) {
-      const cached = await readCache(bookId)
-      const updated = [data, ...cached.filter(e => e.id !== data.id)]
+      const display = await readDisplayCache(bookId)
+      const updated = [data, ...display.filter(e => e.id !== data.id)]
         .sort((a, b) => new Date(b.entry_date).getTime() - new Date(a.entry_date).getTime())
-      await writeCache(bookId, updated)
+      await writeDisplayCache(bookId, updated)
+      await invalidateCache(bookId)  // force export cache refresh
     }
 
     return { data, error: null }
@@ -252,15 +277,12 @@ export const entriesService = {
 
     if (error) return { data: null, error: error.message }
 
-    // Update cache entry in-place
+    // Update display cache in-place; invalidate full export cache
     if (data) {
-      // We need bookId to update cache — extract from the returned entry
-      const cached = await readCache(data.book_id)
-      const idx = cached.findIndex(e => e.id === id)
-      if (idx >= 0) {
-        cached[idx] = data
-        await writeCache(data.book_id, cached)
-      }
+      const display = await readDisplayCache(data.book_id)
+      const idx = display.findIndex(e => e.id === id)
+      if (idx >= 0) { display[idx] = data; await writeDisplayCache(data.book_id, display) }
+      await invalidateCache(data.book_id)
     }
 
     return { data, error: null }
