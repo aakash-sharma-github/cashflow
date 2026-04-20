@@ -2,7 +2,7 @@
   "expo": {
     "name": "CashFlow",
     "slug": "cashflow",
-    "version": "4.5.6",
+    "version": "4.5.7",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -80,7 +80,10 @@
         {
           "icon": "./assets/notification-icon.png",
           "color": "#5B5FED",
-          "sounds": []
+          "sounds": [
+            "./assets/sounds/notification.wav",
+            "./assets/sounds/reminder.wav"
+          ]
         }
       ],
       [
@@ -101,7 +104,8 @@
             "useLegacyPackaging": false
           }
         }
-      ]
+      ],
+      "expo-font"
     ],
     "extra": {
       "eas": {

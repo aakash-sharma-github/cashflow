@@ -1,197 +1,262 @@
 // src/services/notificationService.ts
-// Local notifications only — no Firebase/FCM required.
-// Handles: invitations, entry changes, task reminders, pending task alerts.
+// Local-only notifications — no Firebase/FCM needed.
+//
+// CRITICAL: setNotificationHandler MUST be called at module load time,
+// before any notification is scheduled. This configures how notifications
+// appear when the app is in the foreground.
 
 import * as Notifications from 'expo-notifications'
 import * as Device from 'expo-device'
 import { Platform } from 'react-native'
 
-// Notification channels (Android)
-const CHANNELS = {
+// ── Handler — set at module import, not inside a function ─────
+// If this is inside setup() or a try/catch, notifications may silently
+// fail when the app is in the foreground.
+Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+    }),
+})
+
+// Android notification channels
+const CH = {
     invitations: 'invitations',
     entries: 'entries',
     reminders: 'reminders',
 }
 
-try {
-    Notifications.setNotificationHandler({
-        handleNotification: async () => ({
-            shouldShowAlert: true,
-            shouldPlaySound: true,
-            shouldSetBadge: true,
-        }),
-    })
-} catch { }
+let _permissionGranted: boolean | null = null  // cached after first check
 
 export const notificationService = {
 
+    /**
+     * Request permission and create Android channels.
+     * MUST be called before any notification is sent.
+     * Caches the result so repeated calls are cheap.
+     */
     async setup(): Promise<boolean> {
-        try {
-            if (!Device.isDevice) return false
+        // Not a physical device — simulator can't receive notifications
+        if (!Device.isDevice) {
+            _permissionGranted = false
+            return false
+        }
 
-            if (Platform.OS === 'android') {
-                await Notifications.setNotificationChannelAsync(CHANNELS.invitations, {
+        // Create Android channels regardless of permission status
+        if (Platform.OS === 'android') {
+            try {
+                await Notifications.setNotificationChannelAsync(CH.invitations, {
                     name: 'Invitations',
                     importance: Notifications.AndroidImportance.MAX,
                     vibrationPattern: [0, 250, 250, 250],
                     lightColor: '#5B5FED',
-                    sound: 'default',
+                    sound: 'invitation',   // maps to assets/sounds/invitation.wav
+                    enableLights: true,
+                    enableVibrate: true,
                 })
-                await Notifications.setNotificationChannelAsync(CHANNELS.entries, {
+                await Notifications.setNotificationChannelAsync(CH.entries, {
                     name: 'Entry Changes',
-                    importance: Notifications.AndroidImportance.DEFAULT,
+                    importance: Notifications.AndroidImportance.HIGH,
                     sound: 'default',
+                    enableVibrate: true,
                 })
-                await Notifications.setNotificationChannelAsync(CHANNELS.reminders, {
+                await Notifications.setNotificationChannelAsync(CH.reminders, {
                     name: 'Task Reminders',
                     importance: Notifications.AndroidImportance.HIGH,
                     vibrationPattern: [0, 300, 200, 300],
                     lightColor: '#F59E0B',
-                    sound: 'default',
+                    sound: 'reminder',     // maps to assets/sounds/reminder.wav
+                    enableLights: true,
+                    enableVibrate: true,
                 })
+            } catch (e) {
+                console.warn('[Push] channel setup error:', e)
             }
+        }
 
+        // Request / check permission
+        try {
             const { status: existing } = await Notifications.getPermissionsAsync()
-            if (existing === 'granted') return true
+            if (existing === 'granted') {
+                _permissionGranted = true
+                return true
+            }
             const { status } = await Notifications.requestPermissionsAsync()
-            return status === 'granted'
-        } catch { return false }
+            _permissionGranted = status === 'granted'
+            return _permissionGranted
+        } catch (e) {
+            console.warn('[Push] permission error:', e)
+            _permissionGranted = false
+            return false
+        }
+    },
+
+    /** Check if we have permission — calls setup() if not yet checked */
+    async hasPermission(): Promise<boolean> {
+        if (_permissionGranted !== null) return _permissionGranted
+        return notificationService.setup()
     },
 
     // ── Invitation ──────────────────────────────────────────────
     async sendInvitationNotification(inviterName: string, bookName: string): Promise<void> {
+        if (!await notificationService.hasPermission()) return
         try {
             await Notifications.scheduleNotificationAsync({
                 content: {
                     title: '📬 New Book Invitation',
                     body: `${inviterName} invited you to "${bookName}"`,
                     data: { type: 'invitation' },
-                    sound: 'default',
-                    ...(Platform.OS === 'android' && { channelId: CHANNELS.invitations }),
+                    // iOS: use custom sound file; Android: channel handles sound
+                    sound: Platform.OS === 'ios' ? 'invitation.wav' : undefined,
+                    ...(Platform.OS === 'android' && { channelId: CH.invitations }),
                 },
                 trigger: null,
             })
-        } catch { }
+        } catch (e) {
+            console.warn('[Push] sendInvitationNotification error:', e)
+        }
     },
 
     // ── Entry change notifications ──────────────────────────────
-    async sendEntryAddedNotification(bookName: string, amount: string, type: 'cash_in' | 'cash_out', note?: string): Promise<void> {
+    async sendEntryAddedNotification(
+        bookName: string,
+        amount: string,
+        type: 'cash_in' | 'cash_out',
+        note?: string
+    ): Promise<void> {
+        if (!await notificationService.hasPermission()) return
         try {
             const emoji = type === 'cash_in' ? '💰' : '💸'
-            const dir = type === 'cash_in' ? 'added' : 'spent'
+            const verb = type === 'cash_in' ? 'received' : 'spent'
+            const book = bookName ? `in "${bookName}"` : ''
             await Notifications.scheduleNotificationAsync({
                 content: {
-                    title: `${emoji} Entry in ${bookName}`,
-                    body: note ? `${amount} ${dir} — ${note}` : `${amount} ${dir}`,
+                    title: `${emoji} New Entry${bookName ? ` — ${bookName}` : ''}`,
+                    body: `${amount} ${verb}${note ? ` · ${note}` : ''}${book ? ` ${book}` : ''}`,
                     data: { type: 'entry_added' },
                     sound: 'default',
-                    ...(Platform.OS === 'android' && { channelId: CHANNELS.entries }),
+                    ...(Platform.OS === 'android' && { channelId: CH.entries }),
                 },
                 trigger: null,
             })
-        } catch { }
+        } catch (e) {
+            console.warn('[Push] sendEntryAddedNotification error:', e)
+        }
     },
 
     async sendEntryEditedNotification(bookName: string, amount: string): Promise<void> {
+        if (!await notificationService.hasPermission()) return
         try {
             await Notifications.scheduleNotificationAsync({
                 content: {
                     title: '✏️ Entry Updated',
-                    body: `An entry (${amount}) in "${bookName}" was edited`,
+                    body: `An entry (${amount})${bookName ? ` in "${bookName}"` : ''} was edited`,
                     data: { type: 'entry_edited' },
                     sound: 'default',
-                    ...(Platform.OS === 'android' && { channelId: CHANNELS.entries }),
+                    ...(Platform.OS === 'android' && { channelId: CH.entries }),
                 },
                 trigger: null,
             })
-        } catch { }
+        } catch (e) {
+            console.warn('[Push] sendEntryEditedNotification error:', e)
+        }
     },
 
     async sendEntryDeletedNotification(bookName: string): Promise<void> {
+        if (!await notificationService.hasPermission()) return
         try {
             await Notifications.scheduleNotificationAsync({
                 content: {
                     title: '🗑️ Entry Deleted',
-                    body: `An entry in "${bookName}" was removed by a collaborator`,
+                    body: `An entry${bookName ? ` in "${bookName}"` : ''} was removed by a collaborator`,
                     data: { type: 'entry_deleted' },
                     sound: 'default',
-                    ...(Platform.OS === 'android' && { channelId: CHANNELS.entries }),
+                    ...(Platform.OS === 'android' && { channelId: CH.entries }),
                 },
                 trigger: null,
             })
-        } catch { }
+        } catch (e) {
+            console.warn('[Push] sendEntryDeletedNotification error:', e)
+        }
     },
 
     // ── Task reminders ──────────────────────────────────────────
 
     /**
-     * Schedule a reminder 5 minutes before the task's reminder time.
-     * Returns the notification identifier so it can be cancelled later.
+     * Schedule the 5-minute warning before a task's reminder time.
+     * Returns the notification identifier (store it to cancel later).
      */
-    async scheduleTaskReminder(todoId: string, taskText: string, reminderDate: Date): Promise<string | null> {
+    async scheduleTaskReminder(
+        todoId: string,
+        taskText: string,
+        reminderDate: Date
+    ): Promise<string | null> {
+        if (!await notificationService.hasPermission()) return null
         try {
-            // Cancel any existing reminder for this task first
+            // Cancel existing reminders for this task first
             await notificationService.cancelTaskReminder(todoId)
 
             const fiveMinBefore = new Date(reminderDate.getTime() - 5 * 60 * 1000)
-            const now = new Date()
-
-            // Only schedule if the reminder is in the future
-            if (fiveMinBefore <= now) return null
+            if (fiveMinBefore <= new Date()) return null  // already passed
 
             const id = await Notifications.scheduleNotificationAsync({
                 content: {
                     title: '⏰ Task Reminder',
-                    body: `"${taskText}" is due in 5 minutes`,
+                    body: `"${taskText}" is coming up in 5 minutes`,
                     data: { type: 'task_reminder', todoId },
-                    sound: 'default',
-                    ...(Platform.OS === 'android' && { channelId: CHANNELS.reminders }),
+                    sound: Platform.OS === 'ios' ? 'reminder.wav' : undefined,
+                    ...(Platform.OS === 'android' && { channelId: CH.reminders }),
                 },
                 trigger: { date: fiveMinBefore },
             })
-
             return id
-        } catch { return null }
+        } catch (e) {
+            console.warn('[Push] scheduleTaskReminder error:', e)
+            return null
+        }
     },
 
     /**
-     * Schedule a "still pending" notification at the exact reminder time
-     * if the task hasn't been completed.
-     * Returns the identifier.
+     * Schedule a "still pending" notification at the exact reminder time.
      */
-    async scheduleTaskPending(todoId: string, taskText: string, reminderDate: Date): Promise<string | null> {
+    async scheduleTaskPending(
+        todoId: string,
+        taskText: string,
+        reminderDate: Date
+    ): Promise<string | null> {
+        if (!await notificationService.hasPermission()) return null
         try {
-            const now = new Date()
-            if (reminderDate <= now) return null
+            if (reminderDate <= new Date()) return null
 
             const id = await Notifications.scheduleNotificationAsync({
                 content: {
                     title: '⚠️ Task Still Pending',
-                    body: `"${taskText}" hasn't been completed yet`,
+                    body: `Don't forget: "${taskText}"`,
                     data: { type: 'task_pending', todoId },
-                    sound: 'default',
-                    ...(Platform.OS === 'android' && { channelId: CHANNELS.reminders }),
+                    sound: Platform.OS === 'ios' ? 'reminder.wav' : undefined,
+                    ...(Platform.OS === 'android' && { channelId: CH.reminders }),
                 },
                 trigger: { date: reminderDate },
             })
-
             return id
-        } catch { return null }
+        } catch (e) {
+            console.warn('[Push] scheduleTaskPending error:', e)
+            return null
+        }
     },
 
     /**
-     * Cancel all scheduled notifications for a specific todo.
-     * Call this when a task is completed, deleted, or its reminder is removed.
+     * Cancel all scheduled notifications for a specific todo ID.
      */
     async cancelTaskReminder(todoId: string): Promise<void> {
         try {
             const scheduled = await Notifications.getAllScheduledNotificationsAsync()
-            const toCancel = scheduled.filter(
-                n => n.content.data?.todoId === todoId
+            await Promise.all(
+                scheduled
+                    .filter(n => n.content.data?.todoId === todoId)
+                    .map(n => Notifications.cancelScheduledNotificationAsync(n.identifier))
             )
-            for (const n of toCancel) {
-                await Notifications.cancelScheduledNotificationAsync(n.identifier)
-            }
         } catch { }
     },
 
@@ -200,14 +265,18 @@ export const notificationService = {
         try {
             const sub = Notifications.addNotificationReceivedListener(callback)
             return () => sub.remove()
-        } catch { return () => { } }
+        } catch {
+            return () => { }
+        }
     },
 
     addResponseListener(callback: (r: Notifications.NotificationResponse) => void) {
         try {
             const sub = Notifications.addNotificationResponseReceivedListener(callback)
             return () => sub.remove()
-        } catch { return () => { } }
+        } catch {
+            return () => { }
+        }
     },
 
     async clearBadge(): Promise<void> {

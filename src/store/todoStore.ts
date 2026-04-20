@@ -1,7 +1,10 @@
 // src/store/todoStore.ts
 // Offline-only todo store. All data lives in AsyncStorage on-device.
-// Supports: priority, due date, reminder time, notes.
-// Reminder scheduling is handled by the caller (TodoScreen) using notificationService.
+//
+// USER-SPECIFIC STORAGE: Todos are keyed by userId so each user keeps
+// their own todos across logout/login cycles. The in-memory store is
+// reset on logout but AsyncStorage data persists. When the same user
+// logs back in, their todos are restored from AsyncStorage.
 
 import { create } from 'zustand'
 import AsyncStorage from '@react-native-async-storage/async-storage'
@@ -16,10 +19,10 @@ export interface Todo {
     priority: Priority
     createdAt: string
     completedAt: string | null
-    dueDate: string | null    // ISO date for the due date badge
-    reminderDate: string | null    // ISO datetime for push notification
-    reminderNoteId: string | null    // expo notification ID for the 5-min warning
-    reminderDueId: string | null    // expo notification ID for the "still pending" alert
+    dueDate: string | null    // ISO date for due badge
+    reminderDate: string | null    // ISO datetime for push reminder
+    reminderNoteId: string | null    // Expo notification ID (5-min warning)
+    reminderDueId: string | null    // Expo notification ID (pending alert)
     notes: string | null
 }
 
@@ -29,7 +32,8 @@ interface TodoState {
     searchQuery: string
     isLoaded: boolean
 
-    load: () => Promise<void>
+    load: (userId?: string) => Promise<void>
+    reset: () => void
     addTodo: (text: string, priority?: Priority, dueDate?: string | null, reminderDate?: string | null) => Promise<Todo>
     toggleTodo: (id: string) => Promise<void>
     updateTodo: (id: string, updates: Partial<Pick<Todo, 'text' | 'priority' | 'dueDate' | 'reminderDate' | 'reminderNoteId' | 'reminderDueId' | 'notes'>>) => Promise<void>
@@ -37,39 +41,86 @@ interface TodoState {
     clearCompleted: () => Promise<void>
     setFilter: (f: FilterMode) => void
     setSearchQuery: (q: string) => void
-    filteredTodos: () => Todo[]
-    stats: () => { total: number; completed: number; active: number; high: number }
 }
 
-const STORAGE_KEY = 'cashflow:todos_v2'
+// User-specific key: cashflow:todos:v2:{userId}
+// Falls back to anonymous key for unauthenticated use
+const storageKey = (userId?: string) =>
+    userId ? `cashflow:todos:v2:${userId}` : 'cashflow:todos:v2:anonymous'
+
+// Keep track of current user's key for persist calls
+let _currentKey = storageKey()
 
 async function persist(todos: Todo[]) {
-    try { await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(todos)) } catch { }
+    try {
+        await AsyncStorage.setItem(_currentKey, JSON.stringify(todos))
+    } catch { }
 }
 
 function genId() {
     return `todo_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
 }
 
-export const useTodoStore = create<TodoState>((set, get) => ({
-    todos: [], filter: 'all', searchQuery: '', isLoaded: false,
-
-    load: async () => {
+// Migrate old generic keys → user-specific keys
+async function migrateOldTodos(userId: string): Promise<Todo[]> {
+    const OLD_KEYS = ['cashflow:todos', 'cashflow:todos_v2']
+    for (const key of OLD_KEYS) {
         try {
-            // Try new key first, fall back to old key for migration
-            let raw = await AsyncStorage.getItem(STORAGE_KEY)
-            if (!raw) raw = await AsyncStorage.getItem('cashflow:todos')
-            const todos: Todo[] = raw ? JSON.parse(raw) : []
-            // Migrate: add reminderDate/reminderNoteId/reminderDueId if missing
+            const raw = await AsyncStorage.getItem(key)
+            if (raw) {
+                const todos: Todo[] = JSON.parse(raw)
+                if (todos.length > 0) {
+                    // Move to user-specific key
+                    await AsyncStorage.setItem(storageKey(userId), raw)
+                    await AsyncStorage.removeItem(key)
+                    return todos
+                }
+            }
+        } catch { }
+    }
+    return []
+}
+
+export const useTodoStore = create<TodoState>((set, get) => ({
+    todos: [],
+    filter: 'all',
+    searchQuery: '',
+    isLoaded: false,
+
+    load: async (userId?: string) => {
+        try {
+            _currentKey = storageKey(userId)
+            let raw = await AsyncStorage.getItem(_currentKey)
+
+            let todos: Todo[] = []
+            if (raw) {
+                todos = JSON.parse(raw)
+            } else if (userId) {
+                // First login for this user — check for old generic todos to migrate
+                todos = await migrateOldTodos(userId)
+            }
+
+            // Migrate: add new fields if missing from older data
             const migrated = todos.map(t => ({
-                reminderDate: null, reminderNoteId: null, reminderDueId: null,
+                reminderDate: null,
+                reminderNoteId: null,
+                reminderDueId: null,
+                notes: null,
                 ...t,
             }))
+
             set({ todos: migrated, isLoaded: true })
-            if (raw) await persist(migrated) // save migrated version
+            if (migrated.length > 0) await persist(migrated)
         } catch {
             set({ isLoaded: true })
         }
+    },
+
+    // Called on logout — clears in-memory state but keeps AsyncStorage intact
+    // so todos are restored when user logs back in
+    reset: () => {
+        set({ todos: [], filter: 'all', searchQuery: '', isLoaded: false })
+        _currentKey = storageKey() // reset to anonymous key
     },
 
     addTodo: async (text, priority = 'medium', dueDate = null, reminderDate = null) => {
@@ -114,30 +165,4 @@ export const useTodoStore = create<TodoState>((set, get) => ({
 
     setFilter: (filter) => set({ filter }),
     setSearchQuery: (searchQuery) => set({ searchQuery }),
-
-    filteredTodos: () => {
-        const { todos, filter, searchQuery } = get()
-        let result = todos
-        if (filter === 'active') result = result.filter(t => !t.completed)
-        if (filter === 'completed') result = result.filter(t => t.completed)
-        if (searchQuery.trim()) {
-            const q = searchQuery.toLowerCase()
-            result = result.filter(t => t.text.toLowerCase().includes(q) || (t.notes ?? '').toLowerCase().includes(q))
-        }
-        return result.sort((a, b) => {
-            if (a.completed !== b.completed) return a.completed ? 1 : -1
-            const p = { high: 0, medium: 1, low: 2 }
-            return p[a.priority] - p[b.priority]
-        })
-    },
-
-    stats: () => {
-        const t = get().todos
-        return {
-            total: t.length,
-            completed: t.filter(x => x.completed).length,
-            active: t.filter(x => !x.completed).length,
-            high: t.filter(x => x.priority === 'high' && !x.completed).length,
-        }
-    },
 }))

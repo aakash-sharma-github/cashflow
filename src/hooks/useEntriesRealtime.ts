@@ -11,7 +11,7 @@ import { formatAmount } from '../utils'
  * Subscribes to real-time changes for entries in a specific book.
  * Automatically updates the entries store when changes come in from other users.
  */
-export function useEntriesRealtime(bookId: string) {
+export function useEntriesRealtime(bookId: string, bookName?: string) {
   const addEntry = useEntriesStore(s => s.addEntryFromRealtime)
   const updateEntry = useEntriesStore(s => s.updateEntryFromRealtime)
   const removeEntry = useEntriesStore(s => s.removeEntryFromRealtime)
@@ -45,7 +45,7 @@ export function useEntriesRealtime(bookId: string) {
             // Notify other collaborators about the new entry
             const amt = formatAmount(data.amount)
             notificationService.sendEntryAddedNotification(
-              '', // book name not available here — caller passes it
+              bookName ?? '',
               amt,
               data.type,
               data.note ?? undefined
@@ -71,7 +71,7 @@ export function useEntriesRealtime(bookId: string) {
 
           if (data) {
             updateEntry(data as Entry)
-            notificationService.sendEntryEditedNotification('', formatAmount(data.amount))
+            notificationService.sendEntryEditedNotification(bookName ?? '', formatAmount(data.amount))
           }
           fetchBook(bookId)
         }
@@ -86,7 +86,7 @@ export function useEntriesRealtime(bookId: string) {
         },
         (payload) => {
           removeEntry(payload.old.id)
-          notificationService.sendEntryDeletedNotification('')
+          notificationService.sendEntryDeletedNotification(bookName ?? '')
           fetchBook(bookId)
         }
       )

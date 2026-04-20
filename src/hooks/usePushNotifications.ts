@@ -18,16 +18,7 @@ export function usePushNotifications() {
     // Register device on login
     useEffect(() => {
         if (!isAuthenticated || !user) return
-
-        const initPush = async () => {
-            try {
-                await notificationService.setup()
-            } catch (e) {
-                console.warn('Push setup failed:', e)
-            }
-        }
-
-        initPush()
+        notificationService.setup().catch(console.error)
     }, [isAuthenticated, user?.id])
 
     // Load initial unread count
@@ -69,7 +60,7 @@ export function usePushNotifications() {
                     increment()
 
                     // Fire local notification
-                    await notificationService.sendLocalInvitationNotification(inviterName, bookName)
+                    await notificationService.sendInvitationNotification(inviterName, bookName)
                 }
             )
             .subscribe()

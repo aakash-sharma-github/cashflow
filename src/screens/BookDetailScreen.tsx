@@ -40,8 +40,6 @@ import type { Entry, EntryFilter } from "../types";
 // ── Constants ─────────────────────────────────────────────────
 // Fixed row height lets SectionList skip layout computation entirely (getItemLayout)
 const ENTRY_ROW_HEIGHT = 72;
-const SECTION_HEADER_HEIGHT = 30;
-
 // ── Pure helpers (defined outside component — never recreated) ─
 function groupByDate(entries: Entry[]) {
   const groups: Record<string, Entry[]> = {};
@@ -132,14 +130,11 @@ const EntryRow = memo(function EntryRow({
         </View>
       )}
 
-      {/* <View style={[
-        s.typeBadge,
-        { backgroundColor: isCashIn ? COLORS.cashInDark : COLORS.cashOutDark },
-      ]}>
-        <Text style={[s.typeBadgeText, { color: isCashIn ? COLORS.cashIn : COLORS.cashOut }]}>
-          {isCashIn ? 'IN' : 'OUT'}
-        </Text>
-      </View> */}
+      <View
+        style={[
+          s.typeBadge,
+        ]}
+      />
 
       <View style={s.entryContent}>
         <Text
@@ -226,7 +221,7 @@ export default function BookDetailScreen({ route, navigation }: any) {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  useEntriesRealtime(bookId);
+  useEntriesRealtime(bookId, currentBook?.name);
 
   useFocusEffect(
     useCallback(() => {
@@ -553,16 +548,6 @@ export default function BookDetailScreen({ route, navigation }: any) {
     [theme],
   );
 
-  // ── getItemLayout — eliminates layout computation for fixed rows ──
-  const getItemLayout = useCallback(
-    (_: any, index: number) => ({
-      length: ENTRY_ROW_HEIGHT,
-      offset: ENTRY_ROW_HEIGHT * index,
-      index,
-    }),
-    [],
-  );
-
   const keyExtractor = useCallback((item: Entry) => item.id, []);
 
   const bal = summary?.balance ?? 0;
@@ -689,8 +674,8 @@ export default function BookDetailScreen({ route, navigation }: any) {
           keyExtractor={keyExtractor}
           renderItem={renderItem}
           renderSectionHeader={renderSectionHeader}
-          getItemLayout={getItemLayout}
-          // Performance tuning
+          // Performance tuning — getItemLayout removed: SectionList offsets
+          // must account for section header heights too, or items won't render
           maxToRenderPerBatch={10}
           updateCellsBatchingPeriod={50}
           initialNumToRender={15}
@@ -816,24 +801,21 @@ const s = StyleSheet.create({
   },
   selectBannerText: { fontSize: FONT_SIZE.sm, fontWeight: "600" },
 
-  sectionHeader: {
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: 6,
-    height: SECTION_HEADER_HEIGHT,
-  },
+  sectionHeader: { paddingHorizontal: SPACING.lg, paddingVertical: 6 },
   sectionHeaderText: { fontSize: FONT_SIZE.xs, fontWeight: "600" },
 
   entryRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
-    marginHorizontal: SPACING.lg,
-    // marginTop: SPACING.xs,
-    marginBottom: SPACING.sm,
-    padding: SPACING.lg,
+    alignItems: "center",
     paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.md,
-    borderRadius: BORDER_RADIUS.lg,
+    paddingVertical: SPACING.sm,
     height: ENTRY_ROW_HEIGHT,
+    // borderBottomWidth: StyleSheet.hairlineWidth,
+    // adding marginBottom to create space between rows, since borderBottomWidth is removed for performance
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.lg,
+    marginHorizontal: SPACING.sm,
+    marginBottom: SPACING.xs,
   },
   checkbox: {
     width: 20,
@@ -844,18 +826,20 @@ const s = StyleSheet.create({
     justifyContent: "center",
     marginRight: SPACING.sm,
   },
+  // for space between checkbox and entry content
   typeBadge: {
-    paddingHorizontal: 7,
-    paddingVertical: 4,
-    borderRadius: BORDER_RADIUS.sm,
-    marginRight: SPACING.sm,
-    width: 38,
-    alignItems: "center",
+    // paddingHorizontal: 7,
+    // paddingVertical: 4,
+    // borderRadius: BORDER_RADIUS.sm,
+    // marginRight: SPACING.sm,
+    width: 10,
+    // alignItems: "center",
   },
   typeBadgeText: { fontSize: 10, fontWeight: "800", letterSpacing: 0.3 },
   entryContent: { flex: 1, justifyContent: "center" },
   entryAmt: { fontSize: FONT_SIZE.md, fontWeight: "700", lineHeight: 20 },
-  entryNote: { fontSize: FONT_SIZE.xs, lineHeight: 16 },
+  // note is optional and can be long, so smaller font and single line with ellipsis
+  entryNote: { fontSize: FONT_SIZE.sm, lineHeight: 16 },
   entryMeta: { flexDirection: "row", alignItems: "center", flexWrap: "wrap" },
   entryByText: { fontSize: 10, fontWeight: "600" },
   entryTime: { fontSize: 10 },

@@ -28,24 +28,32 @@ function AppContent() {
   useOfflineSync()
   usePushNotifications()
 
+  const isAuthenticated = useAuthStore(s => s.isAuthenticated)
+  const user = useAuthStore(s => s.user)
+
   useEffect(() => {
     const boot = async () => {
       try {
-        // Run both in parallel — neither should block the other
-        await Promise.all([
-          initialize(),
-          loadTheme(),
-          loadTodos(),
-        ])
+        await Promise.all([initialize(), loadTheme()])
       } catch (e) {
-        console.warn('[App] boot error:', e)
+        // ignore
       } finally {
-        // Always hide the native splash screen, even if something errored
         SplashScreen.hideAsync().catch(() => { })
       }
     }
     boot()
   }, [])
+
+  // Load todos with the user's ID once authenticated
+  // This ensures each user gets their own todo list
+  useEffect(() => {
+    if (isAuthenticated && user?.id) {
+      loadTodos(user.id)
+    } else if (!isAuthenticated) {
+      // Reset in-memory todos on logout (keeps AsyncStorage intact for next login)
+      useTodoStore.getState().reset()
+    }
+  }, [isAuthenticated, user?.id])
 
   // isLoading drives our custom gradient splash (shown by RootNavigator)
   // The native OS splash is gone by now; React renders immediately
