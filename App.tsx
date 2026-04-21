@@ -11,6 +11,7 @@ import { useTodoStore } from './src/store/todoStore'
 import { useOfflineSync } from './src/hooks/useOfflineSync'
 import { usePushNotifications } from './src/hooks/usePushNotifications'
 import { ThemedAlertProvider } from './src/components/common/ThemedAlert'
+import { notificationService } from './src/services/notificationService'
 
 // Keep the native splash visible until we explicitly hide it
 // This prevents the "white flash" between native splash and React render
@@ -34,6 +35,9 @@ function AppContent() {
   useEffect(() => {
     const boot = async () => {
       try {
+        // Request notification permission at app boot — before auth
+        // This ensures channels are created and permission is granted early
+        notificationService.setup().catch(() => { })
         await Promise.all([initialize(), loadTheme()])
       } catch (e) {
         // ignore

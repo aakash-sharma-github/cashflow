@@ -33,9 +33,9 @@ async function shareFile(uri: string, mimeType: string, dialogTitle: string) {
 // Compatible with CashBook and other cash-tracking apps.
 
 export async function exportEntriesAsCSV(entries: Entry[], book: Book): Promise<void> {
-  // Sort oldest first for running balance calculation
+  // Sort newest-first (latest entry at top — matches app display order)
   const sorted = [...entries].sort(
-    (a, b) => new Date(a.entry_date).getTime() - new Date(b.entry_date).getTime()
+    (a, b) => new Date(b.entry_date).getTime() - new Date(a.entry_date).getTime()
   )
 
   let balance = 0
@@ -85,7 +85,7 @@ const APP_ICON_B64 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABAAAAAQACAYA
 
 export async function exportEntriesAsPDF(entries: Entry[], book: Book): Promise<void> {
   const sorted = [...entries].sort(
-    (a, b) => new Date(a.entry_date).getTime() - new Date(b.entry_date).getTime()
+    (a, b) => new Date(b.entry_date).getTime() - new Date(a.entry_date).getTime()
   )
 
   const cashIn = entries.filter(e => e.type === 'cash_in').reduce((s, e) => s + Number(e.amount), 0)
@@ -111,13 +111,13 @@ export async function exportEntriesAsPDF(entries: Entry[], book: Book): Promise<
         <td class="td-remark">${e.note ? esc(e.note) : '<span class="muted">—</span>'}</td>
         <td class="td-entryby">${esc(entryBy)}</td>
         <td class="td-amount ${isCashIn ? 'cash-in' : ''}">
-          ${isCashIn ? `${book.currency} ${amount.toFixed(2)}` : ''}
+          ${isCashIn ? `+${book.currency} ${amount.toFixed(2)}` : ''}
         </td>
         <td class="td-amount ${!isCashIn ? 'cash-out' : ''}">
-          ${!isCashIn ? `${book.currency} ${amount.toFixed(2)}` : ''}
+          ${!isCashIn ? `-${book.currency} ${amount.toFixed(2)}` : ''}
         </td>
         <td class="td-balance" style="color:${runningColor}">
-          ${book.currency} ${Math.abs(running).toFixed(2)}
+          ${running >= 0 ? '' : '-'}${book.currency} ${Math.abs(running).toFixed(2)}
         </td>
       </tr>`
   }).join('')
@@ -228,7 +228,7 @@ export async function exportEntriesAsPDF(entries: Entry[], book: Book): Promise<
   <div class="summary">
     <div class="card balance">
       <div class="card-label">Net Balance</div>
-      <div class="card-value">${book.currency} ${Math.abs(balance).toFixed(2)}</div>
+      <div class="card-value">${isPositive ? '' : '-'}${book.currency} ${Math.abs(balance).toFixed(2)}</div>
       <div class="card-sub">${isPositive ? 'Positive balance' : 'Negative balance'}</div>
     </div>
     <div class="card in">
@@ -262,7 +262,7 @@ export async function exportEntriesAsPDF(entries: Entry[], book: Book): Promise<
 
   <!-- Footer -->
   <div class="footer">
-    <div class="footer-brand">CashFlow — Smart Expense Tracker</div>
+    <div class="footer-brand">💰 CashFlow — Smart Expense Tracker</div>
     <div class="footer-meta">Generated ${format(new Date(), 'yyyy-MM-dd HH:mm')} · Made with ❤️ by Aakash Sharma</div>
   </div>
 

@@ -187,7 +187,7 @@ export default function SettingsScreen({ navigation }: any) {
                                 ]}
                             >
                                 <LinearGradient
-                                    colors={m.role === 'owner' ? ['#5B5FED', '#7C3AED'] : ['#9CA3AF', '#6B7280']}
+                                    colors={m.role === 'owner' ? ['#9CA3AF', '#6B7280'] : ['#9CA3AF', '#6B7280']}
                                     style={styles.memberAvatar}
                                 >
                                     <Text style={styles.memberAvatarText}>
@@ -204,7 +204,7 @@ export default function SettingsScreen({ navigation }: any) {
                                     </Text>
                                 </View>
 
-                                <View style={[
+                                {/* <View style={[
                                     styles.roleBadge,
                                     { backgroundColor: m.role === 'owner' ? COLORS.primaryLight : theme.surfaceSecondary }
                                 ]}>
@@ -215,7 +215,7 @@ export default function SettingsScreen({ navigation }: any) {
                                     ]}>
                                         {m.role === 'owner' ? ' Owner' : 'Member'}
                                     </Text>
-                                </View>
+                                </View> */}
                             </View>
                         ))
                     )}

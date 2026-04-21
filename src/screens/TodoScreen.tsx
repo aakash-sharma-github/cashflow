@@ -165,12 +165,12 @@ function AddSheet({ visible, onClose, theme }: { visible: boolean; onClose: () =
     const [priority, setPriority] = useState<Priority>('medium')
     const [notes, setNotes] = useState('')
     const [dueDate, setDueDate] = useState<Date | null>(null)
-    const [reminderDate, setReminderDate] = useState<Date | null>(null)
+    // Reminder = dueDate (no separate field — reminder fires 5 min before due date)
     const inputRef = useRef<TextInput>(null)
 
     useEffect(() => {
         if (visible) { setTimeout(() => inputRef.current?.focus(), 350) }
-        else { setText(''); setPriority('medium'); setNotes(''); setDueDate(null); setReminderDate(null) }
+        else { setText(''); setPriority('medium'); setNotes(''); setDueDate(null) }
     }, [visible])
 
     const handleAdd = async () => {
@@ -178,9 +178,9 @@ function AddSheet({ visible, onClose, theme }: { visible: boolean; onClose: () =
         const todo = await useTodoStore.getState().addTodo(
             text.trim(), priority,
             dueDate?.toISOString() ?? null,
-            reminderDate?.toISOString() ?? null,
+            dueDate?.toISOString() ?? null,  // reminder = dueDate
         )
-        if (reminderDate) await scheduleReminder(todo, reminderDate)
+        if (dueDate) await scheduleReminder(todo, dueDate)
         Keyboard.dismiss()
         onClose()
     }
@@ -214,13 +214,12 @@ function AddSheet({ visible, onClose, theme }: { visible: boolean; onClose: () =
                             </TouchableOpacity>
                         ))}
                     </View>
-                    <DateTimeRow label="Due Date" value={dueDate} onChange={setDueDate} theme={theme} iconName="calendar-outline" />
-                    <DateTimeRow label="🔔 Reminder" value={reminderDate} onChange={setReminderDate} theme={theme} iconName="alarm-outline" />
-                    {reminderDate && (
+                    <DateTimeRow label="📅 Due Date & Reminder" value={dueDate} onChange={setDueDate} theme={theme} iconName="calendar-outline" />
+                    {dueDate && (
                         <View style={[sheetS.reminderHint, { backgroundColor: COLORS.primaryLight }]}>
-                            <Ionicons name="information-circle-outline" size={13} color={COLORS.primary} />
+                            <Ionicons name="alarm-outline" size={13} color={COLORS.primary} />
                             <Text style={[sheetS.reminderHintText, { color: COLORS.primary }]}>
-                                You'll get a reminder 5 min before, and again if incomplete
+                                You'll be reminded 5 min before due time, and again if incomplete
                             </Text>
                         </View>
                     )}
@@ -259,7 +258,7 @@ function EditSheet({ todo, onClose, theme }: { todo: Todo | null; onClose: () =>
     const [priority, setPriority] = useState<Priority>('medium')
     const [notes, setNotes] = useState('')
     const [dueDate, setDueDate] = useState<Date | null>(null)
-    const [reminderDate, setReminderDate] = useState<Date | null>(null)
+    // reminder = dueDate (no separate field)
 
     useEffect(() => {
         if (todo) {
@@ -267,7 +266,6 @@ function EditSheet({ todo, onClose, theme }: { todo: Todo | null; onClose: () =>
             setPriority(todo.priority)
             setNotes(todo.notes ?? '')
             setDueDate(todo.dueDate ? parseISO(todo.dueDate) : null)
-            setReminderDate(todo.reminderDate ? parseISO(todo.reminderDate) : null)
         }
     }, [todo])
 
@@ -280,13 +278,13 @@ function EditSheet({ todo, onClose, theme }: { todo: Todo | null; onClose: () =>
         await useTodoStore.getState().updateTodo(todo.id, {
             text: text.trim(), priority, notes: notes.trim() || null,
             dueDate: dueDate?.toISOString() ?? null,
-            reminderDate: reminderDate?.toISOString() ?? null,
+            reminderDate: dueDate?.toISOString() ?? null,  // reminder = dueDate
             reminderNoteId: null, reminderDueId: null,
         })
-        // Re-schedule new reminder if set
-        if (reminderDate) {
+        // Re-schedule reminder from dueDate
+        if (dueDate) {
             const updated = useTodoStore.getState().todos.find(t => t.id === todo.id)
-            if (updated) await scheduleReminder(updated, reminderDate)
+            if (updated) await scheduleReminder(updated, dueDate)
         }
         onClose()
     }
@@ -334,13 +332,12 @@ function EditSheet({ todo, onClose, theme }: { todo: Todo | null; onClose: () =>
                             </TouchableOpacity>
                         ))}
                     </View>
-                    <DateTimeRow label="Due Date" value={dueDate} onChange={setDueDate} theme={theme} iconName="calendar-outline" />
-                    <DateTimeRow label="🔔 Reminder" value={reminderDate} onChange={setReminderDate} theme={theme} iconName="alarm-outline" />
-                    {reminderDate && (
+                    <DateTimeRow label="📅 Due Date & Reminder" value={dueDate} onChange={setDueDate} theme={theme} iconName="calendar-outline" />
+                    {dueDate && (
                         <View style={[sheetS.reminderHint, { backgroundColor: COLORS.primaryLight }]}>
-                            <Ionicons name="information-circle-outline" size={13} color={COLORS.primary} />
+                            <Ionicons name="alarm-outline" size={13} color={COLORS.primary} />
                             <Text style={[sheetS.reminderHintText, { color: COLORS.primary }]}>
-                                Reminder 5 min before + pending alert if incomplete
+                                Reminder 5 min before due time, and again if incomplete
                             </Text>
                         </View>
                     )}
@@ -417,12 +414,13 @@ function TaskPreview({ todo, onClose, onEdit, theme }: { todo: Todo | null; onCl
                             </Text>
                         </View>
                     )}
-                    {rem && (
+                    {/* Reminder is same as due date — shown as a single reminder badge */}
+                    {due && (
                         <View style={previewS.metaRow}>
                             <Ionicons name="alarm-outline" size={14} color={COLORS.primary} />
                             <Text style={[previewS.metaLabel, { color: theme.textSecondary }]}>Reminder</Text>
-                            <Text style={[previewS.metaVal, { color: theme.text }]}>
-                                {format(rem, 'dd MMM yyyy, h:mm a')}
+                            <Text style={[previewS.metaVal, { color: COLORS.primary }]}>
+                                5 min before due date
                             </Text>
                         </View>
                     )}

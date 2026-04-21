@@ -2,6 +2,7 @@
 import { useEffect, useRef } from 'react'
 import supabase from '../services/supabase'
 import { useEntriesStore } from '../store/entriesStore'
+import { useAuthStore } from '../store/authStore'
 import { useBooksStore } from '../store/booksStore'
 import type { Entry } from '../types'
 import { notificationService } from '../services/notificationService'
@@ -16,6 +17,8 @@ export function useEntriesRealtime(bookId: string, bookName?: string) {
   const updateEntry = useEntriesStore(s => s.updateEntryFromRealtime)
   const removeEntry = useEntriesStore(s => s.removeEntryFromRealtime)
   const fetchBook = useBooksStore(s => s.fetchBook)
+  // Used to suppress notifications for the entry creator — only collaborators get notified
+  const currentUserId = useAuthStore(s => s.user?.id)
 
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
 
@@ -42,14 +45,18 @@ export function useEntriesRealtime(bookId: string, bookName?: string) {
 
           if (data) {
             addEntry(data as Entry)
-            // Notify other collaborators about the new entry
-            const amt = formatAmount(data.amount)
-            notificationService.sendEntryAddedNotification(
-              bookName ?? '',
-              amt,
-              data.type,
-              data.note ?? undefined
-            )
+            // Only notify if the entry was created by ANOTHER user (not the current user)
+            if (data.user_id !== currentUserId) {
+              const amt = formatAmount(data.amount)
+              const addedBy = data.profile?.full_name || data.profile?.email
+              notificationService.sendEntryAddedNotification(
+                bookName ?? '',
+                amt,
+                data.type,
+                data.note ?? undefined,
+                addedBy,
+              )
+            }
           }
           fetchBook(bookId)
         }
@@ -71,7 +78,11 @@ export function useEntriesRealtime(bookId: string, bookName?: string) {
 
           if (data) {
             updateEntry(data as Entry)
-            notificationService.sendEntryEditedNotification(bookName ?? '', formatAmount(data.amount))
+            // Only notify collaborators — skip if current user made this edit
+            if (data.user_id !== currentUserId) {
+              const editedBy = data.profile?.full_name || data.profile?.email
+              notificationService.sendEntryEditedNotification(bookName ?? '', formatAmount(data.amount), editedBy)
+            }
           }
           fetchBook(bookId)
         }
@@ -86,7 +97,11 @@ export function useEntriesRealtime(bookId: string, bookName?: string) {
         },
         (payload) => {
           removeEntry(payload.old.id)
-          notificationService.sendEntryDeletedNotification(bookName ?? '')
+          // Only notify if it was a collaborator's entry being deleted
+          // (identified by entry's original creator, not necessarily who deleted it)
+          if (payload.old.user_id && payload.old.user_id !== currentUserId) {
+            notificationService.sendEntryDeletedNotification(bookName ?? '')
+          }
           fetchBook(bookId)
         }
       )
