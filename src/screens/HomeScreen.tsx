@@ -1,11 +1,12 @@
 // src/screens/HomeScreen.tsx
-import React, { useCallback, useState, useMemo } from 'react'
+import React, { useCallback, useState, useMemo, memo } from 'react'
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   ActivityIndicator, RefreshControl, Pressable, TextInput,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
+import { Image } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
 import { useBooksStore } from '../store/booksStore'
 import { useAuthStore } from '../store/authStore'
@@ -86,11 +87,20 @@ export default function HomeScreen({ navigation }: any) {
           <View style={s.topLeft}>
             <TouchableOpacity
               onPress={() => navigation.navigate('Settings')}
-              style={[s.avatarSmall, { backgroundColor: COLORS.primaryLight }]}
+              style={s.avatarSmall}
             >
-              <Text style={s.avatarSmallText}>
-                {getInitials(user?.full_name || user?.email || '?')}
-              </Text>
+              {user?.avatar_url ? (
+                <Image
+                  source={{ uri: user.avatar_url }}
+                  style={s.avatarSmallImg}
+                />
+              ) : (
+                <View style={[s.avatarSmallFallback, { backgroundColor: COLORS.primaryLight }]}>
+                  <Text style={s.avatarSmallText}>
+                    {getInitials(user?.full_name || user?.email || '?')}
+                  </Text>
+                </View>
+              )}
             </TouchableOpacity>
             <View>
               <Text style={[s.businessName, { color: theme.text }]} numberOfLines={1}>
@@ -255,7 +265,9 @@ const s = StyleSheet.create({
   },
   topLeft: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, flex: 1 },
   topIconBtn: { padding: 4 },
-  avatarSmall: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  avatarSmall: { width: 36, height: 36, borderRadius: 18, overflow: 'hidden' },
+  avatarSmallImg: { width: 36, height: 36, borderRadius: 18 },
+  avatarSmallFallback: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   avatarSmallText: { color: COLORS.primary, fontWeight: '800', fontSize: FONT_SIZE.sm },
   businessName: { fontSize: FONT_SIZE.md, fontWeight: '700', maxWidth: 210 },
   businessSub: { fontSize: FONT_SIZE.xs, marginTop: 1 },

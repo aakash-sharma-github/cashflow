@@ -127,7 +127,6 @@ export const authService = {
         .single()
 
       if (error) {
-        // Network failure — try the cached profile
         const cached = await authService.getCachedProfile()
         if (cached && cached.id === user.id) {
           return { data: cached, error: null }
@@ -135,7 +134,23 @@ export const authService = {
         return { data: null, error: error.message }
       }
 
-      // Success — update cache with fresh data
+      // Sync avatar_url from Google OAuth metadata on every login.
+      // Google provides it in user_metadata.avatar_url or user_metadata.picture.
+      // We always update so the photo stays current if the user changes it.
+      const googleAvatar =
+        user.user_metadata?.avatar_url ||
+        user.user_metadata?.picture ||
+        null
+
+      if (googleAvatar && googleAvatar !== data.avatar_url) {
+        // Write back to profiles table so it persists and stays current
+        await supabase
+          .from('profiles')
+          .update({ avatar_url: googleAvatar })
+          .eq('id', user.id)
+        data.avatar_url = googleAvatar
+      }
+
       await authService.setCachedProfile(data)
       return { data, error: null }
     } catch {

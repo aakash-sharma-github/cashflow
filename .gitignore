@@ -34,6 +34,9 @@ production.md
 distribution.md
 rls-security-analysis.md
 final_apk
+google-services.json
+supabase/.temp
+
 
 # Metro
 .metro-health-check*

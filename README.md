@@ -1,175 +1,177 @@
-# 💰 CashFlow
+# Supabase CLI
 
-> Smart, collaborative expense tracking for individuals and teams.
+[![Coverage Status](https://coveralls.io/repos/github/supabase/cli/badge.svg?branch=develop)](https://coveralls.io/github/supabase/cli?branch=develop) [![Bitbucket Pipelines](https://img.shields.io/bitbucket/pipelines/supabase-cli/setup-cli/master?style=flat-square&label=Bitbucket%20Canary)](https://bitbucket.org/supabase-cli/setup-cli/pipelines) [![Gitlab Pipeline Status](https://img.shields.io/gitlab/pipeline-status/sweatybridge%2Fsetup-cli?label=Gitlab%20Canary)
+](https://gitlab.com/sweatybridge/setup-cli/-/pipelines)
 
-A production-grade mobile app built with **React Native (Expo ~51)** + **Supabase**. Track cash flow across multiple ledger books, collaborate in real time, and stay on top of every transaction — online or offline.
+[Supabase](https://supabase.io) is an open source Firebase alternative. We're building the features of Firebase using enterprise-grade open source tools.
 
----
+This repository contains all the functionality for Supabase CLI.
 
-## ✨ Features
+- [x] Running Supabase locally
+- [x] Managing database migrations
+- [x] Creating and deploying Supabase Functions
+- [x] Generating types directly from your database schema
+- [x] Making authenticated HTTP requests to [Management API](https://supabase.com/docs/reference/api/introduction)
 
-### Core
-- 📧 **Magic Link + Google OAuth** — passwordless sign-in
-- 📚 **Multiple Books** — Personal, Business, Family — independent ledgers
-- 💸 **Cash In / Cash Out** — entries with notes, custom date/time picker
-- 📊 **Running Balance** — always-visible net position
-- 🎨 **Dark & Light Mode** — system-aware, persisted preference
+## Getting started
 
-### Collaboration
-- 👥 **Invite by Email** — add collaborators to any book
-- 🔔 **Local Push Notifications** — instant alert when you receive an invite
-- ⚡ **Real-Time Sync** — all members see changes live via Supabase Realtime
-- 🔐 **Row Level Security** — users only access their own data
+### Install the CLI
 
-### Offline First
-- 📴 **Full Offline CRUD** — create, edit, delete without internet
-- 🔄 **Auto Sync** — queued operations replay on reconnect
-- 💾 **Local Cache** — all data readable offline via AsyncStorage
-
-### Export & Import
-- 📊 **CSV Export** — open in Excel, Google Sheets, Numbers
-- 📑 **PDF Export** — branded report with summary + transaction table
-- 📗 **Excel Export (.xlsx)** — native Excel workbook with summary sheet
-- 📂 **CSV / Excel / XLSM Import** — bulk import with live preview
-
-### Tasks
-- ✅ **Offline Todos** — full task manager, device-local, no server needed
-- 🎯 **Priority Levels** — High / Medium / Low with color coding
-- 🔍 **Search + Filter** — find and filter tasks instantly
-
-### Settings & Profile
-- 👤 **Edit Display Name** — update what collaborators see
-- 🔒 **Privacy Policy** — full in-app page
-- 📜 **Terms & Conditions** — full in-app page
-
----
-
-## 🏗️ Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Mobile | React Native 0.74 (Expo ~51) |
-| Backend | Supabase (PostgreSQL + Auth + Realtime) |
-| State | Zustand 4 |
-| Navigation | React Navigation v6 |
-| Auth | Magic Link OTP + Google OAuth |
-| Storage | Expo SecureStore (chunked) + AsyncStorage |
-| Notifications | expo-notifications (local, no Firebase) |
-| Export | expo-print + expo-sharing + xlsx |
-| Version | expo-constants (reads from app.json) |
-
----
-
-## 🚀 Quick Start
-
-### Prerequisites
-- Node.js 18+
-- `npm install -g eas-cli`
-- Supabase account (free tier works)
-- Physical device with Expo Go (for testing)
-
-### 1. Clone & Install
-```bash
-git clone https://github.com/aakash-sharma-github/cashflow.git
-cd cashflow
-npm install
-```
-
-### 2. Configure Environment
-```bash
-cp .env.example .env
-# Fill in:
-# EXPO_PUBLIC_SUPABASE_URL
-# EXPO_PUBLIC_SUPABASE_ANON_KEY
-# EXPO_PUBLIC_EAS_PROJECT_ID
-```
-
-### 3. Run Supabase Migrations
-In Supabase SQL Editor, run in order:
-1. `supabase/migrations/001_schema.sql`
-2. `supabase/migrations/002_fix_rls.sql`
-3. `supabase/migrations/003_fix_rls_final.sql`
-4. `supabase/migrations/004_fix_rls_definitive.sql` ← **Required**
-
-### 4. Configure Supabase Auth
-- Auth → URL Config → add `cashflow://auth/callback`
-- Auth → Providers → enable Google (Client ID + Secret)
-
-### 5. Start Dev Server
-```bash
-npx expo start
-# Scan QR with Expo Go app
-```
-
----
-
-## 📁 Project Structure
-
-```
-cashflow/
-├── App.tsx                          # Boot: auth + theme + offline + push
-├── app.json                         # Single version source of truth
-├── eas.json                         # EAS build profiles (autoIncrement)
-├── scripts/
-│   └── bump-version.js              # npm run version:patch|minor|major
-├── assets/                          # icon, splash, adaptive-icon, notification-icon
-├── src/
-│   ├── screens/ (13 screens)
-│   ├── services/ (9 services)
-│   ├── store/ (7 Zustand stores)
-│   ├── hooks/ (3 hooks)
-│   ├── components/common/
-│   │   ├── OfflineBanner.tsx
-│   │   └── ThemedAlert.tsx          # Themed dialogs + action sheets
-│   ├── navigation/index.tsx
-│   ├── utils/
-│   │   ├── index.ts
-│   │   └── version.ts               # Live version from expo-constants
-│   ├── constants/index.ts
-│   └── types/index.ts
-└── supabase/
-    ├── migrations/ (4 SQL files)
-    └── functions/send-invite/
-```
-
----
-
-## 🔢 Versioning
-
-Version is managed in `app.json` only — never hardcode it anywhere else.
+Available via [NPM](https://www.npmjs.com) as dev dependency. To install:
 
 ```bash
-npm run version:patch   # 1.0.0 → 1.0.1  (bug fixes)
-npm run version:minor   # 1.0.0 → 1.1.0  (new features)
-npm run version:major   # 1.0.0 → 2.0.0  (breaking changes)
+npm i supabase --save-dev
 ```
 
-`versionCode` (Android) is **auto-incremented by EAS** on each production build — you never touch it. The in-app version display reads from `expo-constants` at runtime.
+When installing with yarn 4, you need to disable experimental fetch with the following nodejs config.
 
----
+```
+NODE_OPTIONS=--no-experimental-fetch yarn add supabase
+```
 
-## 🔐 Security
+> **Note**
+For Bun versions below v1.0.17, you must add `supabase` as a [trusted dependency](https://bun.sh/guides/install/trusted) before running `bun add -D supabase`.
 
-- Row Level Security on all tables (see migration 004 for the definitive fix)
-- JWT tokens chunked across SecureStore keys (>2KB limit bypass)
-- All trigger/helper functions owned by `postgres` (true superuser bypass)
-- Local notifications only — no Firebase/FCM required
+<details>
+  <summary><b>macOS</b></summary>
 
----
+  Available via [Homebrew](https://brew.sh). To install:
 
-## 📦 All Dependencies
+  ```sh
+  brew install supabase/tap/supabase
+  ```
 
-See `package.json`. Key additions beyond standard Expo:
-`@react-native-community/datetimepicker`, `expo-notifications`, `expo-device`, `expo-constants`, `expo-splash-screen`, `xlsx`
+  To install the beta release channel:
+  
+  ```sh
+  brew install supabase/tap/supabase-beta
+  brew link --overwrite supabase-beta
+  ```
+  
+  To upgrade:
 
----
+  ```sh
+  brew upgrade supabase
+  ```
+</details>
 
-## 🗺️ Roadmap
+<details>
+  <summary><b>Windows</b></summary>
 
-See `agents.md` for detailed future scope checkpoints (FP-01 through FP-12).
+  Available via [Scoop](https://scoop.sh). To install:
 
----
+  ```powershell
+  scoop bucket add supabase https://github.com/supabase/scoop-bucket.git
+  scoop install supabase
+  ```
 
-## 📝 License
+  To upgrade:
 
-MIT © 2026 CashFlow
+  ```powershell
+  scoop update supabase
+  ```
+</details>
+
+<details>
+  <summary><b>Linux</b></summary>
+
+  Available via [Homebrew](https://brew.sh) and Linux packages.
+
+  #### via Homebrew
+
+  To install:
+
+  ```sh
+  brew install supabase/tap/supabase
+  ```
+
+  To upgrade:
+
+  ```sh
+  brew upgrade supabase
+  ```
+
+  #### via Linux packages
+
+  Linux packages are provided in [Releases](https://github.com/supabase/cli/releases). To install, download the `.apk`/`.deb`/`.rpm`/`.pkg.tar.zst` file depending on your package manager and run the respective commands.
+
+  ```sh
+  sudo apk add --allow-untrusted <...>.apk
+  ```
+
+  ```sh
+  sudo dpkg -i <...>.deb
+  ```
+
+  ```sh
+  sudo rpm -i <...>.rpm
+  ```
+
+  ```sh
+  sudo pacman -U <...>.pkg.tar.zst
+  ```
+</details>
+
+<details>
+  <summary><b>Other Platforms</b></summary>
+
+  You can also install the CLI via [go modules](https://go.dev/ref/mod#go-install) without the help of package managers.
+
+  ```sh
+  go install github.com/supabase/cli@latest
+  ```
+
+  Add a symlink to the binary in `$PATH` for easier access:
+
+  ```sh
+  ln -s "$(go env GOPATH)/bin/cli" /usr/bin/supabase
+  ```
+
+  This works on other non-standard Linux distros.
+</details>
+
+<details>
+  <summary><b>Community Maintained Packages</b></summary>
+
+  Available via [pkgx](https://pkgx.sh/). Package script [here](https://github.com/pkgxdev/pantry/blob/main/projects/supabase.com/cli/package.yml).
+  To install in your working directory:
+
+  ```bash
+  pkgx install supabase
+  ```
+
+  Available via [Nixpkgs](https://nixos.org/). Package script [here](https://github.com/NixOS/nixpkgs/blob/master/pkgs/development/tools/supabase-cli/default.nix).
+</details>
+
+### Run the CLI
+
+```bash
+supabase bootstrap
+```
+
+Or using npx:
+
+```bash
+npx supabase bootstrap
+```
+
+The bootstrap command will guide you through the process of setting up a Supabase project using one of the [starter](https://github.com/supabase-community/supabase-samples/blob/main/samples.json) templates.
+
+## Docs
+
+Command & config reference can be found [here](https://supabase.com/docs/reference/cli/about).
+
+## Breaking changes
+
+We follow semantic versioning for changes that directly impact CLI commands, flags, and configurations.
+
+However, due to dependencies on other service images, we cannot guarantee that schema migrations, seed.sql, and generated types will always work for the same CLI major version. If you need such guarantees, we encourage you to pin a specific version of CLI in package.json.
+
+## Developing
+
+To run from source:
+
+```sh
+# Go >= 1.22
+go run . help
+```
