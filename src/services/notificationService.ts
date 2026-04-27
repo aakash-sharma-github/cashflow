@@ -196,12 +196,12 @@ export const notificationService = {
         const ok = await notificationService.hasPermission()
         if (!ok) { console.warn('[Push] sendEntryAdded: no permission'); return }
         try {
-            const arrow = type === 'cash_in' ? '↑' : '↓'
+            // const arrow = type === 'cash_in' ? '↑' : '↓'
             const label = type === 'cash_in' ? 'Cash In' : 'Cash Out'
             const who = addedBy || 'A member'
             await Notifications.scheduleNotificationAsync({
                 content: {
-                    title: `${arrow} ${amount} ${label}${bookName ? ` — ${bookName}` : ''}`,
+                    title: `${amount} ${label}${bookName ? ` — ${bookName}` : ''}`,
                     body: note ? `"${note}" by ${who}` : `Added by ${who}`,
                     data: { type: 'entry_added' },
                     ...(Platform.OS === 'android' && { channelId: CH.entries }),

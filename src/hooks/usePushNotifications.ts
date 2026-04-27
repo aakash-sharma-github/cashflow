@@ -44,7 +44,7 @@ async function registerPushToken(userId: string): Promise<void> {
             }
         } catch (e) {
             // Firebase/APNs not configured yet — local notifications still work
-            console.log('[Push] Push token registration skipped (Firebase not configured):', String(e).slice(0, 80))
+            console.log('[Push] Push token registration skipped (Firebase not configured):', String(e).slice(0, 500))
         }
     } catch { }
 }

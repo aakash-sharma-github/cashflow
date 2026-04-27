@@ -94,9 +94,9 @@ serve(async (req: Request) => {
             let body = ''
 
             if (eventType === 'INSERT') {
-                const arrow = entryType === 'cash_in' ? '↑' : '↓'
+                // const arrow = entryType === 'cash_in' ? '↑' : '↓'
                 const label = entryType === 'cash_in' ? 'Cash In' : 'Cash Out'
-                title = `${arrow} ${amount} ${label} — ${bookName}`
+                title = `${amount} ${label} — ${bookName}`
                 body = note
                     ? `"${note}" — added by ${actorName}`
                     : `${actorName} added a new ${label.toLowerCase()} entry`
