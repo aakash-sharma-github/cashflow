@@ -189,7 +189,7 @@ export default function SettingsScreen({ navigation }: any) {
                                 ]}
                             >
                                 <LinearGradient
-                                    colors={m.role === 'owner' ? ['#5B5FED', '#7C3AED'] : ['#9CA3AF', '#6B7280']}
+                                    colors={m.role === 'owner' ? ['#9CA3AF', '#6B7280'] : ['#9CA3AF', '#6B7280']}
                                     style={styles.memberAvatar}
                                 >
                                     <Text style={styles.memberAvatarText}>
@@ -206,7 +206,8 @@ export default function SettingsScreen({ navigation }: any) {
                                     </Text>
                                 </View>
 
-                                <View style={[
+                                {/* Role badge - comment out for now */}
+                                {/* <View style={[
                                     styles.roleBadge,
                                     { backgroundColor: m.role === 'owner' ? COLORS.primaryLight : theme.surfaceSecondary }
                                 ]}>
@@ -217,13 +218,13 @@ export default function SettingsScreen({ navigation }: any) {
                                     ]}>
                                         {m.role === 'owner' ? ' Owner' : 'Member'}
                                     </Text>
-                                </View>
+                                </View> */}
                             </View>
                         ))
                     )}
                 </View>
 
-                {/* ── About CashFlow ───────────────────────────── */}
+                {/* Developer settings */}
                 {/* DEV-only: test notification pipeline */}
                 {__DEV__ && (
                     <>
@@ -246,6 +247,7 @@ export default function SettingsScreen({ navigation }: any) {
                     </>
                 )}
 
+                {/* ── About CashFlow ───────────────────────────── */}
                 <SectionHeader title="About CashFlow" />
                 <View style={[styles.card, { backgroundColor: theme.surface }]}>
                     <SettingRow
@@ -269,10 +271,10 @@ export default function SettingsScreen({ navigation }: any) {
                         iconBg="#EEF2FF"
                         iconColor={COLORS.primary}
                         label="About Us"
-                        sublabel={`CashFlow v${APP_VERSION} (build ${BUILD_NUMBER})`}
+                        sublabel={`CashFlow v${APP_VERSION}`}
                         onPress={() => themedAlert(
                             'CashFlow',
-                            'Version 1.1.0\n\nA smart, collaborative expense tracker built for teams and individuals.\n\n© 2024 CashFlow. All rights reserved.',
+                            `Version ${APP_VERSION}\n\nA smart, collaborative expense tracker built for teams and individuals.\n\n©${new Date().getFullYear()} CashFlow. All rights reserved.`,
                             [{ text: 'OK' }]
                         )}
                     />
@@ -302,9 +304,6 @@ export default function SettingsScreen({ navigation }: any) {
                 <View style={[styles.madeWith, { borderTopColor: theme.border }]}>
                     <Text style={[styles.madeWithText, { color: theme.textTertiary }]}>
                         Made with ❤️ by Aakash Sharma
-                    </Text>
-                    <Text style={[styles.madeWithSub, { color: theme.textTertiary }]}>
-                        CashFlow v{APP_VERSION}
                     </Text>
                 </View>
 

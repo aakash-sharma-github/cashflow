@@ -14,6 +14,10 @@ import { useInboxStore } from '../store/inboxStore'
 import { COLORS, SPACING, BORDER_RADIUS, FONT_SIZE, SHADOW } from '../constants'
 import { formatRelativeTime } from '../utils'
 import type { Invitation } from '../types'
+import {
+  themedAlert,
+  themedActionSheet,
+} from "../components/common/ThemedAlert";
 
 export default function NotificationsScreen() {
   const [invitations, setInvitations] = useState<Invitation[]>([])
@@ -38,24 +42,41 @@ export default function NotificationsScreen() {
     setProcessingId(inv.id)
     const { error } = await invitationsService.acceptInvitation(inv.id)
     setProcessingId(null)
-    if (error) { Alert.alert('Error', error); return }
+    if (error) {
+      themedAlert("Error:", error);
+      return;
+    }
+
     setInvitations(p => p.filter(i => i.id !== inv.id))
-    Alert.alert('Joined! 🎉', `You've joined "${inv.book?.name}"`)
+    // Alert.alert('Joined! 🎉', `You've joined "${inv.book?.name}"`)
+    themedAlert('Joined! 🎉', `You've joined "${inv.book?.name}"`);
   }
 
   const handleReject = (inv: Invitation) => {
-    Alert.alert('Decline', `Decline invite to "${inv.book?.name}"?`, [
+    // Alert.alert('Decline', `Decline invite to "${inv.book?.name}"?`, [
+    //   { text: 'Cancel', style: 'cancel' },
+    //   {
+    //     text: 'Decline', style: 'destructive', onPress: async () => {
+    //       setProcessingId(inv.id)
+    //       const { error } = await invitationsService.rejectInvitation(inv.id)
+    //       setProcessingId(null)
+    //       if (error) Alert.alert('Error', error)
+    //       else setInvitations(p => p.filter(i => i.id !== inv.id))
+    //     },
+    //   },
+    // ])
+    themedAlert('Decline', `Decline invite to "${inv.book?.name}"?`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Decline', style: 'destructive', onPress: async () => {
           setProcessingId(inv.id)
           const { error } = await invitationsService.rejectInvitation(inv.id)
           setProcessingId(null)
-          if (error) Alert.alert('Error', error)
+          if (error) themedAlert('Error:', error);
           else setInvitations(p => p.filter(i => i.id !== inv.id))
         },
       },
-    ])
+    ]);
   }
 
   const renderItem = ({ item }: { item: Invitation }) => {
