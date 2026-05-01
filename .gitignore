@@ -36,7 +36,7 @@ rls-security-analysis.md
 final_apk
 google-services.json
 supabase/.temp
-
+proguard-rules.pro
 
 # Metro
 .metro-health-check*
