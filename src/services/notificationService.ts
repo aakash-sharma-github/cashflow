@@ -196,12 +196,12 @@ export const notificationService = {
         const ok = await notificationService.hasPermission()
         if (!ok) { console.warn('[Push] sendEntryAdded: no permission'); return }
         try {
-            // const arrow = type === 'cash_in' ? '↑' : '↓'
+            const arrow = type === 'cash_in' ? '↑' : '↓'
             const label = type === 'cash_in' ? 'Cash In' : 'Cash Out'
             const who = addedBy || 'A member'
             await Notifications.scheduleNotificationAsync({
                 content: {
-                    title: `${amount} ${label}${bookName ? ` — ${bookName}` : ''}`,
+                    title: `${arrow} ${amount} ${label}${bookName ? ` — ${bookName}` : ''}`,
                     body: note ? `"${note}" by ${who}` : `Added by ${who}`,
                     data: { type: 'entry_added' },
                     ...(Platform.OS === 'android' && { channelId: CH.entries }),
@@ -279,9 +279,11 @@ export const notificationService = {
                 },
                 // If < 5 min away: fire in 5 seconds (immediate-ish) so user still gets notified
                 // If > 5 min away: fire exactly 5 min before
+                // 'timeInterval' trigger type works across all Android versions
+                // including Doze mode. Always fires even when device is in deep sleep.
                 trigger: secsUntilWarn > 10
-                    ? { seconds: secsUntilWarn, repeats: false }
-                    : { seconds: 5, repeats: false },
+                    ? { type: 'timeInterval', seconds: secsUntilWarn, repeats: false } as any
+                    : { type: 'timeInterval', seconds: 5, repeats: false } as any,
             })
 
             console.log('[Push] ✅ 5-min reminder scheduled, id:', id, 'fires in', Math.max(5, secsUntilWarn), 'seconds')
@@ -313,7 +315,7 @@ export const notificationService = {
                     data: { type: 'task_pending', todoId },
                     ...(Platform.OS === 'android' && { channelId: CH.reminders }),
                 },
-                trigger: { seconds: secsUntilDue, repeats: false },
+                trigger: { type: 'timeInterval', seconds: secsUntilDue, repeats: false } as any,
             })
 
             console.log('[Push] ✅ Pending alert scheduled, id:', id)

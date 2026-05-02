@@ -89,20 +89,18 @@ export const booksService = {
    * Create a new book
    */
   async createBook(formData: BookFormData): Promise<ApiResponse<Book>> {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return { data: null, error: 'Not authenticated' }
-
+    // Use the create_book() SECURITY DEFINER function instead of direct INSERT.
+    // This bypasses the books RLS policy which can fail if auth.uid() is still
+    // null during session hydration immediately after login.
+    // The function validates auth.uid() server-side and inserts the book + owner
+    // membership atomically.
     const { data, error } = await supabase
-      .from('books')
-      .insert({
-        name: formData.name.trim(),
-        description: formData.description.trim() || null,
-        color: formData.color,
-        currency: formData.currency,
-        owner_id: user.id,
+      .rpc('create_book', {
+        p_name: formData.name.trim(),
+        p_description: formData.description?.trim() || null,
+        p_color: formData.color,
+        p_currency: formData.currency,
       })
-      .select()
-      .single()
 
     if (error) return { data: null, error: error.message }
     return {
