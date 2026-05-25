@@ -37,6 +37,11 @@ final_apk
 google-services.json
 supabase/.temp
 proguard-rules.pro
+github-release-notes.md
+commands.md
+cashflow-firebase.json
+oauth
+readme
 
 # Metro
 .metro-health-check*
