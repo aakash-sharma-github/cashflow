@@ -58,13 +58,17 @@ function useSlideAnim(visible: boolean) {
 }
 
 // ── Task reminder helper ──────────────────────────────────────
+// Schedules all 3 reminders (3min before, at due time, 10min after)
+// and stores their IDs in the todo so they can be cancelled later.
 async function scheduleReminder(todo: Todo, reminderDate: Date) {
-    const noteId = await notificationService.scheduleTaskReminder(todo.id, todo.text, reminderDate)
-    const dueId = await notificationService.scheduleTaskPending(todo.id, todo.text, reminderDate)
+    const ids = await notificationService.scheduleAllReminders(todo.id, todo.text, reminderDate)
     await useTodoStore.getState().updateTodo(todo.id, {
         reminderDate: reminderDate.toISOString(),
-        reminderNoteId: noteId,
-        reminderDueId: dueId,
+        reminderNoteId: ids[0] ?? null,   // 3-min warning ID
+        reminderDueId: ids[1] ?? null,   // due-time ID
+        // ids[2] (10-min overdue) is also scheduled but we don't store its ID separately
+        // cancelTaskReminder() cancels ALL scheduled notifications matching the todoId
+        // via data.todoId on the notification content, so all 3 get cancelled
     })
 }
 
@@ -176,9 +180,11 @@ function AddSheet({ visible, onClose, theme }: { visible: boolean; onClose: () =
     const handleAdd = async () => {
         if (!text.trim()) return
         const todo = await useTodoStore.getState().addTodo(
-            text.trim(), priority,
+            text.trim(),
+            priority,
             dueDate?.toISOString() ?? null,
             dueDate?.toISOString() ?? null,  // reminder = dueDate
+            notes.trim() || null,             // ← pass notes so they are persisted
         )
         if (dueDate) await scheduleReminder(todo, dueDate)
         Keyboard.dismiss()

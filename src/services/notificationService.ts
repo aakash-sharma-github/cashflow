@@ -72,7 +72,7 @@ export const notificationService = {
                     lightColor: '#5B5FED',
                     enableLights: true,
                     enableVibrate: true,
-                    // sound: 'invitation',  // uncomment after native rebuild with sounds
+                    sound: 'invitation',  // maps to assets/sounds/invitation.wav
                 })
                 console.log('[Push] Channel created: invitations')
 
@@ -90,7 +90,7 @@ export const notificationService = {
                     lightColor: '#F59E0B',
                     enableLights: true,
                     enableVibrate: true,
-                    // sound: 'reminder',  // uncomment after native rebuild with sounds
+                    sound: 'reminder',  // maps to assets/sounds/reminder.wav
                 })
                 console.log('[Push] Channel created: reminders')
             } catch (e) {
@@ -255,75 +255,123 @@ export const notificationService = {
     // trigger: { seconds: N } is the most compatible format
     // across all Android versions and expo-notifications ~0.28
     // ─────────────────────────────────────────────────────────────
-    async scheduleTaskReminder(todoId: string, taskText: string, dueDate: Date): Promise<string | null> {
+    // ─────────────────────────────────────────────────────────────
+    // scheduleAllReminders()
+    // Schedules exactly 3 OS-level alarms for a task:
+    //
+    //   1. 3 MINUTES BEFORE due time   → "⏰ Due Soon" + custom reminder sound
+    //   2. EXACTLY AT due time         → "🔔 Task Due Now" + custom reminder sound
+    //   3. 10 MINUTES AFTER due time   → "📋 Still Pending" + custom reminder sound
+    //      (only fires if task not completed — OS fires it regardless, but
+    //       the user should complete the task before then to avoid it)
+    //
+    // Returns an array of notification IDs (up to 3) for cancellation later.
+    // All use the 'cashflow_reminders' Android channel (custom sound: reminder.wav)
+    // ─────────────────────────────────────────────────────────────
+    async scheduleAllReminders(
+        todoId: string,
+        taskText: string,
+        dueDate: Date,
+    ): Promise<string[]> {
         const ok = await notificationService.hasPermission()
-        if (!ok) { console.warn('[Push] scheduleTaskReminder: no permission'); return null }
-
-        try {
-            // Cancel any existing reminder for this task first
-            await notificationService.cancelTaskReminder(todoId)
-
-            const now = Date.now()
-            const fiveMinBefore = new Date(dueDate.getTime() - 5 * 60 * 1000)
-            const secsUntilWarn = Math.floor((fiveMinBefore.getTime() - now) / 1000)
-            const dueTimeStr = dueDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-
-            console.log('[Push] Scheduling 5-min warning:', secsUntilWarn, 'seconds from now')
-
-            const id = await Notifications.scheduleNotificationAsync({
-                content: {
-                    title: '⏰ Due Soon',
-                    body: `"${taskText}" is due at ${dueTimeStr}`,
-                    data: { type: 'task_reminder', todoId },
-                    ...(Platform.OS === 'android' && { channelId: CH.reminders }),
-                },
-                // If < 5 min away: fire in 5 seconds (immediate-ish) so user still gets notified
-                // If > 5 min away: fire exactly 5 min before
-                // 'timeInterval' trigger type works across all Android versions
-                // including Doze mode. Always fires even when device is in deep sleep.
-                trigger: secsUntilWarn > 10
-                    ? { type: 'timeInterval', seconds: secsUntilWarn, repeats: false } as any
-                    : { type: 'timeInterval', seconds: 5, repeats: false } as any,
-            })
-
-            console.log('[Push] ✅ 5-min reminder scheduled, id:', id, 'fires in', Math.max(5, secsUntilWarn), 'seconds')
-            return id
-        } catch (e) {
-            console.error('[Push] scheduleTaskReminder FAILED:', e)
-            return null
+        if (!ok) {
+            console.warn('[Push] scheduleAllReminders: no permission')
+            return []
         }
-    },
 
-    async scheduleTaskPending(todoId: string, taskText: string, dueDate: Date): Promise<string | null> {
-        const ok = await notificationService.hasPermission()
-        if (!ok) return null
+        // Cancel any existing reminders for this task first
+        await notificationService.cancelTaskReminder(todoId)
 
-        try {
-            const secsUntilDue = Math.floor((dueDate.getTime() - Date.now()) / 1000)
+        const now = Date.now()
+        const dueMs = dueDate.getTime()
+        const dueStr = dueDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        const ids: string[] = []
 
-            if (secsUntilDue <= 0) {
-                console.log('[Push] scheduleTaskPending: due date is in the past, skipping')
+        // ── Helper: schedule one notification ────────────────────
+        const schedule = async (
+            fireAt: Date,
+            title: string,
+            body: string,
+            type: string,
+        ): Promise<string | null> => {
+            const secsFromNow = Math.floor((fireAt.getTime() - Date.now()) / 1000)
+
+            // Skip if time has already passed
+            if (secsFromNow <= 0) {
+                console.log(`[Push] Skipping "${type}" — time already passed (${secsFromNow}s)`)
                 return null
             }
 
-            console.log('[Push] Scheduling pending alert in', secsUntilDue, 'seconds')
-
-            const id = await Notifications.scheduleNotificationAsync({
-                content: {
-                    title: '📋 Task Still Pending',
-                    body: `"${taskText}" is overdue`,
-                    data: { type: 'task_pending', todoId },
-                    ...(Platform.OS === 'android' && { channelId: CH.reminders }),
-                },
-                trigger: { type: 'timeInterval', seconds: secsUntilDue, repeats: false } as any,
-            })
-
-            console.log('[Push] ✅ Pending alert scheduled, id:', id)
-            return id
-        } catch (e) {
-            console.error('[Push] scheduleTaskPending FAILED:', e)
-            return null
+            try {
+                const id = await Notifications.scheduleNotificationAsync({
+                    content: {
+                        title,
+                        body,
+                        data: { type, todoId },
+                        sound: Platform.OS === 'ios' ? 'reminder.wav' : undefined,
+                        ...(Platform.OS === 'android' && { channelId: CH.reminders }),
+                    },
+                    // 'timeInterval' works in Doze mode on all Android versions.
+                    // Minimum 1 second to avoid platform errors.
+                    trigger: {
+                        type: 'timeInterval',
+                        seconds: Math.max(1, secsFromNow),
+                        repeats: false,
+                    } as any,
+                })
+                console.log(`[Push] ✅ "${type}" scheduled in ${secsFromNow}s, id: ${id}`)
+                return id
+            } catch (e) {
+                console.error(`[Push] ❌ "${type}" schedule FAILED:`, e)
+                return null
+            }
         }
+
+        // ── Notification 1: 3 minutes before ─────────────────────
+        const threeMinBefore = new Date(dueMs - 3 * 60 * 1000)
+        const id1 = await schedule(
+            threeMinBefore,
+            '⏰ Due Soon',
+            `"${taskText}" is due at ${dueStr} — 3 minutes remaining`,
+            'task_warning',
+        )
+        if (id1) ids.push(id1)
+
+        // ── Notification 2: exactly at due time ───────────────────
+        const id2 = await schedule(
+            dueDate,
+            '🔔 Task Due Now',
+            `"${taskText}" is due right now`,
+            'task_due',
+        )
+        if (id2) ids.push(id2)
+
+        // ── Notification 3: 10 minutes after (if still active) ───
+        const tenMinAfter = new Date(dueMs + 10 * 60 * 1000)
+        const id3 = await schedule(
+            tenMinAfter,
+            '📋 Task Still Pending',
+            `"${taskText}" was due at ${dueStr} and hasn't been completed`,
+            'task_overdue',
+        )
+        if (id3) ids.push(id3)
+
+        console.log(`[Push] Scheduled ${ids.length} reminder(s) for task: "${taskText}"`)
+        return ids
+    },
+
+    // Legacy wrappers — kept so existing callers don't break
+    // Both now delegate to scheduleAllReminders()
+    async scheduleTaskReminder(todoId: string, taskText: string, dueDate: Date): Promise<string | null> {
+        const ids = await notificationService.scheduleAllReminders(todoId, taskText, dueDate)
+        return ids[0] ?? null
+    },
+
+    async scheduleTaskPending(todoId: string, taskText: string, dueDate: Date): Promise<string | null> {
+        // scheduleAllReminders already schedules the "pending" notification
+        // Return the second ID (due-time notification) for backwards compat
+        const ids = await notificationService.scheduleAllReminders(todoId, taskText, dueDate)
+        return ids[1] ?? null
     },
 
     async cancelTaskReminder(todoId: string): Promise<void> {

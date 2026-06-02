@@ -34,7 +34,7 @@ interface TodoState {
 
     load: (userId?: string) => Promise<void>
     reset: () => void
-    addTodo: (text: string, priority?: Priority, dueDate?: string | null, reminderDate?: string | null) => Promise<Todo>
+    addTodo: (text: string, priority?: Priority, dueDate?: string | null, reminderDate?: string | null, notes?: string | null) => Promise<Todo>
     toggleTodo: (id: string) => Promise<void>
     updateTodo: (id: string, updates: Partial<Pick<Todo, 'text' | 'priority' | 'dueDate' | 'reminderDate' | 'reminderNoteId' | 'reminderDueId' | 'notes'>>) => Promise<void>
     deleteTodo: (id: string) => Promise<void>
@@ -123,11 +123,12 @@ export const useTodoStore = create<TodoState>((set, get) => ({
         _currentKey = storageKey() // reset to anonymous key
     },
 
-    addTodo: async (text, priority = 'medium', dueDate = null, reminderDate = null) => {
+    addTodo: async (text, priority = 'medium', dueDate = null, reminderDate = null, notes = null) => {
         const todo: Todo = {
             id: genId(), text: text.trim(), completed: false, priority,
             createdAt: new Date().toISOString(), completedAt: null,
-            dueDate, reminderDate, reminderNoteId: null, reminderDueId: null, notes: null,
+            dueDate, reminderDate, reminderNoteId: null, reminderDueId: null,
+            notes: notes?.trim() || null,
         }
         const next = [todo, ...get().todos]
         set({ todos: next })
