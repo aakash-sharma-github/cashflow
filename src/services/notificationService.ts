@@ -314,10 +314,9 @@ export const notificationService = {
                     // 'timeInterval' works in Doze mode on all Android versions.
                     // Minimum 1 second to avoid platform errors.
                     trigger: {
-                        type: 'timeInterval',
                         seconds: Math.max(1, secsFromNow),
                         repeats: false,
-                    } as any,
+                    },
                 })
                 console.log(`[Push] ✅ "${type}" scheduled in ${secsFromNow}s, id: ${id}`)
                 return id

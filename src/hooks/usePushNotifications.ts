@@ -64,8 +64,19 @@ async function registerPushToken(userId: string): Promise<void> {
     const token = result.data  // ExponentPushToken[xxxx...]
 
     console.log('[Push] ✅ Token obtained:', token.slice(0, 42) + '...')
-    await authService.updateProfile({ push_token: token })
-    console.log('[Push] ✅ Token saved to profiles.push_token')
+
+    // Use SECURITY DEFINER RPC to save push token — bypasses RLS timing issues
+    // where getUser() succeeds but the JWT in the client may be stale
+    const { error: rpcError } = await supabase.rpc('save_push_token', {
+      p_token: token,
+    })
+    if (rpcError) {
+      console.error('[Push] ❌ save_push_token RPC failed:', rpcError.message)
+      // Fallback: try direct update
+      await authService.updateProfile({ push_token: token })
+    } else {
+      console.log('[Push] ✅ Token saved to profiles.push_token via RPC')
+    }
   } catch (e) {
     console.error(
       '[Push] ❌ getExpoPushTokenAsync failed.\n' +
@@ -86,7 +97,7 @@ export function usePushNotifications() {
     if (!isAuthenticated || !user?.id) return
     notificationService.setup()
       .then(granted => { if (granted) registerPushToken(user.id) })
-      .catch(() => {})
+      .catch(() => { })
   }, [isAuthenticated, user?.id])
 
   // Load initial unread invitation count for badge
@@ -107,9 +118,9 @@ export function usePushNotifications() {
       .on(
         'postgres_changes',
         {
-          event:  'INSERT',
+          event: 'INSERT',
           schema: 'public',
-          table:  'invitations',
+          table: 'invitations',
           filter: `invitee_email=eq.${user.email}`,
         },
         async (payload) => {
@@ -139,7 +150,7 @@ export function usePushNotifications() {
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
-        notificationService.clearBadge().catch(() => {})
+        notificationService.clearBadge().catch(() => { })
       }
     })
     return () => sub.remove()
