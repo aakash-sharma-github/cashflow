@@ -10,9 +10,6 @@ web-build/
 
 # build
 build/
-android/
-ios/
-
 
 # VSCode
 .vscode/
