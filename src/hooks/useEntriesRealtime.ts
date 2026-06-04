@@ -78,11 +78,10 @@ export function useEntriesRealtime(bookId: string, bookName?: string) {
 
           if (data) {
             updateEntry(data as Entry)
-            // Only notify collaborators — skip if current user made this edit
-            if (data.user_id !== currentUserId) {
-              const editedBy = data.profile?.full_name || data.profile?.email
-              notificationService.sendEntryEditedNotification(bookName ?? '', formatAmount(data.amount), editedBy)
-            }
+            // NOTE: We do NOT send a local notification for UPDATE events.
+            // data.user_id is the entry CREATOR, not who edited it — we can't
+            // reliably tell if the current user is the editor from this payload.
+            // The server-side pgmq trigger uses auth.uid() and handles this correctly.
           }
           fetchBook(bookId)
         }
@@ -97,11 +96,13 @@ export function useEntriesRealtime(bookId: string, bookName?: string) {
         },
         (payload) => {
           removeEntry(payload.old.id)
-          // Only notify if it was a collaborator's entry being deleted
-          // (identified by entry's original creator, not necessarily who deleted it)
-          if (payload.old.user_id && payload.old.user_id !== currentUserId) {
-            notificationService.sendEntryDeletedNotification(bookName ?? '')
-          }
+          // NOTE: We do NOT send a local notification for DELETE events.
+          // Reason 1: payload.old.user_id is the entry CREATOR, not who deleted it.
+          //           We cannot know from the client payload who performed the delete.
+          // Reason 2: The server-side pgmq trigger uses auth.uid() (actual deleter)
+          //           and sends the correct push notification to other members.
+          // Sending a local notification here would cause the deleter to receive
+          // a notification about their own deletion.
           fetchBook(bookId)
         }
       )

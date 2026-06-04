@@ -88,15 +88,37 @@ export const useAuthStore = create<AuthState>((set) => ({
             const { data: profile } = await authService.getProfile()
             set({ user: profile, isAuthenticated: true, isLoading: false })
           } catch {
-            // Online sign-in but profile fetch failed — keep authenticated
             set({ isAuthenticated: true, isLoading: false })
           }
         }, 500)
-      } else if (event === 'SIGNED_OUT') {
-        // Only log out on EXPLICIT sign-out — not on network loss
-        set({ user: null, isAuthenticated: false, isLoading: false })
+
       } else if (event === 'TOKEN_REFRESHED') {
-        // Silently refresh — no navigation change needed
+        // JWT refreshed silently — no action needed
+
+      } else if (event === 'SIGNED_OUT') {
+        // CRITICAL: Supabase fires SIGNED_OUT both when:
+        //   (a) user explicitly signs out — should log out ✅
+        //   (b) token refresh fails (no internet) — should NOT log out ❌
+        //
+        // Distinguish by checking if we have a cached profile AND no session.
+        // If there is a cached profile, the user was previously authenticated
+        // and is likely just offline — keep them logged in from cache.
+        const cached = await authService.getCachedProfile()
+        if (cached) {
+          // Offline token refresh failure — restore auth from cache
+          console.log('[Auth] SIGNED_OUT event — restoring from cache (offline?)')
+          set({ user: cached, isAuthenticated: true, isLoading: false })
+        } else {
+          // No cache — genuine sign-out
+          set({ user: null, isAuthenticated: false, isLoading: false })
+        }
+
+      } else if (event === 'USER_UPDATED') {
+        // Profile was updated — refresh local copy
+        try {
+          const { data: profile } = await authService.getProfile()
+          if (profile) set({ user: profile })
+        } catch { }
       }
     })
   },
@@ -128,6 +150,11 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   signOut: async () => {
+    // Clear cache FIRST so the SIGNED_OUT auth event handler
+    // finds no cached profile and proceeds with the actual logout.
+    // If we clear after, there's a race where the event fires before
+    // the cache is cleared and the user stays logged in.
+    await authService.setCachedProfile(null)
     await authService.signOut()
     set({ user: null, isAuthenticated: false })
   },
