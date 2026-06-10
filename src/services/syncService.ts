@@ -18,13 +18,23 @@ export const syncService = {
    * Returns IDs of succeeded and failed ops.
    */
   async replayQueue(ops: PendingOperation[], userId: string): Promise<SyncResult> {
+    // Sort so CREATE_BOOK always runs before CREATE_ENTRY/UPDATE_ENTRY/DELETE_ENTRY.
+    // This is critical when a book and its entries were both created offline:
+    // CREATE_BOOK must sync first and patch its book_id into sibling entry ops.
+    const TYPE_ORDER: Record<string, number> = {
+      CREATE_BOOK: 0, UPDATE_BOOK: 1, DELETE_BOOK: 2,
+      CREATE_ENTRY: 3, UPDATE_ENTRY: 4, DELETE_ENTRY: 5,
+    }
+    ops.sort((a, b) => (TYPE_ORDER[a.type] ?? 9) - (TYPE_ORDER[b.type] ?? 9))
+    const allOps = ops  // reference used by CREATE_BOOK to patch siblings
+
     const succeeded: string[] = []
     const failed: string[] = []
     const errors: Record<string, string> = {}
 
-    for (const op of ops) {
+    for (const op of allOps) {
       try {
-        await syncService.replayOne(op, userId)
+        await syncService.replayOne(op, userId, allOps)
         succeeded.push(op.id)
       } catch (err: any) {
         failed.push(op.id)
@@ -40,28 +50,50 @@ export const syncService = {
     return { succeeded, failed, errors }
   },
 
-  async replayOne(op: PendingOperation, userId: string): Promise<void> {
+  async replayOne(op: PendingOperation, userId: string, allOps: PendingOperation[]): Promise<void> {
     const { type, payload } = op
 
     switch (type) {
       // ── Books ─────────────────────────────────────────
       case 'CREATE_BOOK': {
-        // Use the server-generated ID if available in payload,
-        // otherwise upsert will create a new one.
         const { tempId, ...bookData } = payload
         const { data, error } = await supabase
-          .from('books')
-          .insert({ ...bookData, owner_id: userId })
-          .select()
-          .single()
-        if (error) throw new Error(error.message)
+          .rpc('create_book', {
+            p_name: bookData.name,
+            p_description: bookData.description || null,
+            p_color: bookData.color,
+            p_currency: bookData.currency,
+          })
+        if (error) {
+          if (error.code === '23505') {
+            console.warn('[Sync] CREATE_BOOK duplicate — skipping')
+            break
+          }
+          throw new Error(error.message)
+        }
         // Update local cache: replace temp record with real server record
         if (tempId && data) {
+          const realId = data.id
           const books = await localBooksDb.getAll(userId)
           const updated = books.map(b =>
             b.id === tempId ? { ...b, ...data, role: 'owner' as const } : b
           )
           await localBooksDb.save(userId, updated)
+
+          // CRITICAL: patch all subsequent queued operations that reference
+          // the temp book ID. Without this, CREATE_ENTRY ops for this book
+          // will fail with "invalid input syntax for type uuid: local_xxx".
+          // The pending ops array is mutated in-place so later iterations
+          // of this loop see the corrected book_id.
+          for (const pendingOp of allOps) {
+            if (
+              ['CREATE_ENTRY', 'UPDATE_ENTRY', 'DELETE_ENTRY'].includes(pendingOp.type) &&
+              pendingOp.payload.book_id === tempId
+            ) {
+              pendingOp.payload.book_id = realId
+              console.log('[Sync] Patched', pendingOp.type, 'book_id:', tempId, '→', realId)
+            }
+          }
         }
         break
       }
@@ -88,24 +120,62 @@ export const syncService = {
       // ── Entries ───────────────────────────────────────
       case 'CREATE_ENTRY': {
         const { tempId, ...entryData } = payload
+        // If book_id is still a temp ID, CREATE_BOOK hasn't synced yet
+        // This shouldn't happen if ops are processed in order + CREATE_BOOK patches them,
+        // but guard against it anyway
+        if (entryData.book_id && entryData.book_id.startsWith('local_')) {
+          console.warn('[Sync] CREATE_ENTRY skipped — book_id is still temp:', entryData.book_id)
+          throw new Error('Book not yet synced — retry after CREATE_BOOK')
+        }
         const { data, error } = await supabase
           .from('entries')
           .insert({ ...entryData, user_id: userId })
           .select()
           .single()
-        if (error) throw new Error(error.message)
-        // Replace temp entry in local cache
+
+        if (error) {
+          // 23505 = unique_violation — entry already exists on server (duplicate)
+          // Treat as success so we don't retry it forever
+          if (error.code === '23505') {
+            console.warn('[Sync] CREATE_ENTRY duplicate — skipping:', error.message)
+            // Clean up the temp entry from local cache
+            if (tempId) {
+              const bookId = entryData.book_id
+              const entries = await localEntriesDb.getByBook(userId, bookId)
+              const cleaned = entries.filter(e => e.id !== tempId)
+              await localEntriesDb.save(userId, bookId, cleaned)
+            }
+            break
+          }
+          throw new Error(error.message)
+        }
+
+        // Replace temp entry in local cache with server-confirmed entry
         if (tempId && data) {
           const bookId = entryData.book_id
           const entries = await localEntriesDb.getByBook(userId, bookId)
           const updated = entries.map(e => e.id === tempId ? { ...e, ...data } : e)
           await localEntriesDb.save(userId, bookId, updated)
+
+          // Also update Zustand state so UI shows server ID immediately
+          const { useEntriesStore } = require('../store/entriesStore')
+          const entriesStore = useEntriesStore.getState()
+          if (entriesStore.entries.some((e: any) => e.id === tempId)) {
+            entriesStore.entries = entriesStore.entries.map((e: any) =>
+              e.id === tempId ? { ...e, ...data } : e
+            )
+          }
         }
         break
       }
 
       case 'UPDATE_ENTRY': {
         const { entryId, ...updates } = payload
+        // Skip if entryId is still a temp ID (CREATE_ENTRY hasn't synced yet)
+        if (entryId && entryId.startsWith('local_')) {
+          console.warn('[Sync] UPDATE_ENTRY skipped — entryId is still temp:', entryId)
+          throw new Error('Entry not yet synced — retry after CREATE_ENTRY')
+        }
         const { error } = await supabase
           .from('entries')
           .update(updates)
@@ -115,6 +185,18 @@ export const syncService = {
       }
 
       case 'DELETE_ENTRY': {
+        // If entryId is still a temp ID, the entry never reached the server
+        // Treat as success — just remove from local cache
+        if (payload.entryId && payload.entryId.startsWith('local_')) {
+          console.log('[Sync] DELETE_ENTRY skipped — temp entry never reached server:', payload.entryId)
+          // Remove from local cache
+          if (payload.book_id) {
+            const entries = await localEntriesDb.getByBook(userId, payload.book_id)
+            const cleaned = entries.filter(e => e.id !== payload.entryId)
+            await localEntriesDb.save(userId, payload.book_id, cleaned)
+          }
+          break
+        }
         const { error } = await supabase
           .from('entries')
           .delete()

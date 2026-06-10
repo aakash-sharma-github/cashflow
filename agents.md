@@ -1,192 +1,220 @@
-# CashFlow — Agent Context & Progress
+# CashFlow — Agent & Developer Context
 
-> **Stack:** React Native (Expo ~51) + Supabase  
-> **Version:** 1.0.0 (see app.json — single source of truth)  
-> **Status:** 🟢 Production Ready
+> Last updated: June 2026 — Production release
+> Stack: React Native 0.74.5 · Expo ~51 · Supabase (PostgreSQL 17) · TypeScript
 
 ---
 
-## 🏗️ Architecture
+## Quick Reference
 
 ```
-App.tsx         → boot: initialize() + loadTheme() + loadTodos() in parallel
-                  ThemedAlertProvider at root (above NavigationContainer)
-navigation/     → Stack + Tab + theme-aware modal contentStyle
-screens/        → 13 screens, all inline theme props (zero StyleSheet.create violations)
-services/       → 9 services: supabase, auth, books, entries, invitations,
-                  localDb, sync, export, notifications
-store/          → 7 Zustand stores: auth, books, entries, offline, inbox, theme, todo
-hooks/          → useEntriesRealtime, useOfflineSync, usePushNotifications
-components/     → OfflineBanner, ThemedAlert (dialog + action sheet)
-utils/version   → reads APP_VERSION / BUILD_NUMBER from expo-constants at runtime
+Package name  : com.cashflow.cashflow
+EAS project   : 2dd5e903-ee74-4052-aa22-b8e1751a1ebf
+Supabase ref  : qtnbxoblqnnracmlksda  (region: ap-southeast-2)
+Author        : Aakash Sharma · aakashsharma9855@gmail.com
 ```
 
 ---
 
-## 🗄️ Database
+## Architecture
 
-**Run migrations in order: 001 → 002 → 003 → 004**
-
-Migration 004 is definitive — it:
-1. Clears ALL book_members INSERT policies using a DO block
-2. Adds a single simple policy: `WITH CHECK (auth.uid() = user_id)`
-3. Sets `OWNER TO postgres` on all SECURITY DEFINER functions
-4. Recreates accept/reject invitation functions with proper ownership
-
-**Tables:** `profiles`, `books`, `book_members`, `entries`, `invitations`
-
-**Critical:** `profiles` needs a `push_token` column (added in migration or manually):
-```sql
-ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS push_token TEXT;
+```
+App.tsx                   boot: setup() + initialize() + loadTheme() + todos(userId)
+navigation/index.tsx      AuthStack | AppStack + MainTabs (5 tabs)
+src/
+  screens/                14 screens
+  services/               supabase, auth, books, entries, export, notifications, sync
+  store/                  7 Zustand stores (auth, books, entries, inbox, offline, theme, todo)
+  hooks/                  useEntriesRealtime, useOfflineSync, usePushNotifications
+  components/common/      ThemedAlert (event-bus), OfflineBanner, AppLogo
+  constants/index.ts      COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOW, PAGE_SIZE
+  types/index.ts          Profile, Book, Entry, Invitation, BookMember
+  utils/index.ts          formatAmount, getInitials, date helpers
 ```
 
 ---
 
-## ✅ Completed Phases
+## Critical Architecture Rules
 
-### Phase 1 — Auth + Books
-- [x] Magic link OTP + Google OAuth
-- [x] ChunkedSecureStore (>2KB session fix)
-- [x] Hard 8s timeout on initialize() — splash never freezes
-- [x] Books CRUD offline-first + RLS (migration 004)
+### 1. Dark Mode — NEVER in StyleSheet.create()
+All theme tokens must be applied as inline style props:
+```tsx
+// ✅ Correct
+<Text style={[s.title, { color: theme.text }]}>
 
-### Phase 2 — Entries
-- [x] Entries CRUD with optimistic updates
-- [x] Native date+time picker (iOS modal / Android ref-based sequential)
-- [x] No KAV on Android (prevents scroll-disappear bug)
-- [x] Filter All / In / Out + pagination
+// ❌ Wrong — theme.text is undefined at StyleSheet.create() time
+const s = StyleSheet.create({ title: { color: theme.text } })
+```
 
-### Phase 3 — Collaboration
-- [x] Email invitations (Resend edge function)
-- [x] Accept/reject with SECURITY DEFINER functions
-- [x] Real-time sync via Supabase Realtime
-- [x] Inbox tab badge with live count
+### 2. Android New Architecture — Keep OFF
+`newArchEnabled: false` for Android in `app.json`. expo-notifications and
+@react-native-community/datetimepicker crash on Fabric (New Arch) with
+NoSuchMethodException. iOS New Arch is enabled (works fine).
 
-### Phase 4 — Offline
-- [x] AsyncStorage local cache
-- [x] Persistent operation queue (survives restarts)
-- [x] Auto-sync on reconnect + animated OfflineBanner
+### 3. SectionList — No getItemLayout
+`getItemLayout` on SectionList must account for section header heights in
+the flat index offset calculation. The formula `ENTRY_ROW_HEIGHT * index` is
+wrong — it ignores header rows. Result: items beyond ~15 don't render on scroll.
+Fix: omit getItemLayout. Use windowSize={5} + removeClippedSubviews for perf.
 
-### Phase 5 — Export / Import
-- [x] CSV export + import
-- [x] PDF export (expo-print branded report)
-- [x] Excel export (.xlsx with summary sheet)
-- [x] Excel import (.xlsx + .xlsm)
+### 4. Two-Cache System — Never Merge
+entriesService.ts maintains two separate AsyncStorage keys:
+- `displayCacheKey` — written ONLY by getEntries(page=0), holds 30 items for offline UI
+- `fullCacheKey`   — written ONLY by getAllEntries(), holds ALL items for export
+Merging them causes exports to return only 30 entries.
 
-### Phase 6 — Notifications
-- [x] Local notifications (no Firebase required)
-- [x] Supabase Realtime invite listener fires local notification
-- [x] Inbox badge red dot with count
+### 5. create_book() RPC — Never Direct INSERT
+booksService.createBook() calls `supabase.rpc('create_book', {...})`.
+Direct `.from('books').insert()` triggers the RLS WITH CHECK which evaluates
+auth.uid() from the Supabase JS client — which reads the JWT from SecureStore
+asynchronously. If the insert fires before the JWT read completes, auth.uid()
+is null and the insert is rejected. The SECURITY DEFINER RPC reads auth.uid()
+from the HTTP request header (always synchronous server-side).
 
-### Phase 7 — UI Polish
-- [x] Dark/light mode — zero StyleSheet.create violations (auto-checked)
-- [x] ThemedAlert: animated dialog + bottom action sheet (replaces all Alert.alert)
-- [x] Modal contentStyle fix (CreateBook, AddEditEntry, EditProfile now respect dark mode)
-- [x] Entry long press → action sheet (Edit / Delete / Cancel)
-- [x] Book long press → action sheet (Edit / Delete / Cancel)
+### 6. RLS auth.uid() Pattern — Always use (select auth.uid())
+Every RLS policy uses `(select auth.uid())` not `auth.uid()`. The subselect
+form is evaluated ONCE per query; the bare form re-evaluates once per row.
+At scale this is a 10-100x performance difference on large tables.
 
-### Phase 8 — Todos
-- [x] Offline Zustand store → AsyncStorage persistence
-- [x] Priority (High/Medium/Low) + search + filter
-- [x] Animated checkbox, due date badges, notes
-- [x] Add sheet + edit modal + swipe hints
+### 7. SIGNED_OUT ≠ Logout
+Supabase fires SIGNED_OUT both on explicit logout AND on token refresh failure
+(no internet). authStore handles this by checking getCachedProfile() before
+clearing state. If a cached profile exists, the user is offline — stay logged in.
+Explicit signOut() clears the cache FIRST so the event handler finds no cache.
 
-### Phase 9 — Versioning
-- [x] `app.json` is single source of truth for version
-- [x] `eas.json` has `autoIncrement: true` for versionCode
-- [x] `scripts/bump-version.js` → `npm run version:patch|minor|major`
-- [x] `src/utils/version.ts` reads live version via expo-constants
-- [x] Settings screen shows live version (never hardcoded)
+### 8. Push Notifications — Three Layers
+- **Task reminders**: OS-level AlarmManager alarms, always fire, no internet
+- **Entry changes (app open)**: Supabase Realtime → useEntriesRealtime → local notification
+- **Entry changes (app closed)**: pgmq trigger → pg_net HTTP → Expo Push API → FCM → device
+
+Entry notifications use auth.uid() in the DB trigger (the actor, not creator).
+Local Realtime notifications are suppressed for UPDATE/DELETE — server handles those.
 
 ---
 
-## 🔭 Future Scope Checkpoints
+## Database
 
-### 🔲 FP-01 — Monthly Analytics Dashboard
-- Bar chart: cash in vs out per month (Victory Native / react-native-chart-kit)
-- Month-over-month delta indicator
-- Category breakdown pie chart
-- Export analytics as PDF
+### Tables
+```
+profiles      id, email, full_name, avatar_url, push_token, updated_at
+books         id, name, currency, color, owner_id, created_at, updated_at
+book_members  book_id, user_id, role (owner|member), created_at
+entries       id, book_id, user_id, type, amount, note, entry_date, created_at, updated_at
+invitations   id, book_id, inviter_id, invitee_email, invitee_id, status, created_at, updated_at
+```
 
-### 🔲 FP-02 — Category & Tag System
-- `category` column on entries (migration required)
-- Predefined + custom categories per book
-- Filter entries by category
-- Budget limits per category with over-budget alert
+### Functions (all SECURITY DEFINER, owner: postgres)
+| Function | Called by | Purpose |
+|---|---|---|
+| `create_book(name, desc, color, currency)` | App via RPC | Creates book + owner membership atomically |
+| `handle_new_book()` | Trigger on books INSERT | Inserts owner into book_members |
+| `handle_new_user()` | Trigger on auth.users INSERT | Creates profile, syncs Google avatar |
+| `accept_invitation(uuid)` | App via RPC | Accepts invite, inserts book_members row |
+| `reject_invitation(uuid)` | App via RPC | Updates invitation status to rejected |
+| `is_book_member(uuid)` | RLS policies | Returns bool, NULL-safe |
+| `is_book_owner(uuid)` | RLS policies | Returns bool, NULL-safe |
+| `save_push_token(text)` | App via RPC | Saves push token, bypasses RLS timing |
+| `notify_push_trigger()` | Trigger on entries/invitations | pgmq enqueue + immediate process |
+| `process_push_message(jsonb)` | notify_push_trigger | Looks up members, calls send_expo_push |
+| `send_expo_push(...)` | process_push_message | pg_net HTTP POST to Expo Push API |
+| `format_inr(numeric)` | send_expo_push | Formats currency amounts |
 
-### 🔲 FP-03 — Recurring Entries
-- `recurring_entries` table: frequency + next_date
-- Auto-generate entries on schedule
-- Reminder notification before due date
-
-### 🔲 FP-04 — Multi-Currency + Live Rates
-- Free exchange rate API (exchangerate-api.com)
-- Show all books in one base currency on HomeScreen
-- Per-entry currency override
-- Historical rate snapshot stored with entry
-
-### 🔲 FP-05 — Advanced Export
-- Date range filter on export
-- Export by category
-- Scheduled weekly email report (Edge Function)
-
-### 🔲 FP-06 — Deep Notification Center
-- Full notification history (not just pending invites)
-- Types: new entry by collaborator, balance threshold, recurring reminder
-- Tap notification → deep link into relevant book
-
-### 🔲 FP-07 — Biometric / PIN Lock
-- expo-local-authentication (FaceID / TouchID / Fingerprint)
-- Auto-lock timeout setting
-- PIN fallback
-
-### 🔲 FP-08 — Home Screen Widget
-- Balance widget for iOS / Android home screen
-- Requires bare workflow or expo-widgets (experimental)
-
-### 🔲 FP-09 — Web Version
-- Expo Web build for main CRUD flows
-- Responsive layout, useful for desktop data entry
-
-### 🔲 FP-10 — Audit Log
-- `entry_history` table: who changed what, when
-- Per-entry "History" modal
-- Business accountability use case
-
-### 🔲 FP-11 — Firebase Remote Push
-- Add `google-services.json` to Android build
-- Replace local notification with FCM remote push
-- Works when app is closed / background
-- Required for: balance alerts, scheduled reminders
-
-### 🔲 FP-12 — AI Spending Insights
-- Weekly Claude API summary via Edge Function
-- "You spent 23% more on Food this week"
-- In-app insight card + push notification
+### Migrations (run in order)
+```
+001_schema.sql                  — Base schema
+002_fix_rls.sql                 — Initial RLS
+003_fix_rls_final.sql           — RLS improvements
+004_fix_rls_definitive.sql      — handle_new_book OWNER TO postgres fix
+005_avatar_and_fcm.sql          — push_token column, avatar sync
+006_pgmq_push_notifications.sql — pgmq + pg_net replaces Firebase Edge Function
+007_fix_push_notifications.sql  — Drop old webhook triggers, fix process flow
+008_fix_profiles_upsert.sql     — save_push_token SECURITY DEFINER function
+009_fix_push_actor_id.sql       — Use auth.uid() in trigger (actual actor, not creator)
+010_production_hardening.sql    — (select auth.uid()) in all policies, index cleanup
+010b_remaining_indexes.sql      — Missing FK indexes
+```
 
 ---
 
-## 🐛 Known Issues / Tech Debt
+## Stores
 
-| Issue | Severity | Notes |
-|-------|----------|-------|
-| Push only works when app is open | Medium | Local notifications only; FP-11 adds FCM |
-| Offline sync is last-write-wins | Low | No CRDT; acceptable at current scale |
-| No pagination on Settings members | Low | <20 members for most users |
-| Google OAuth redirect varies per env | Info | Documented in production.md |
+| Store | Key State | Persistence |
+|---|---|---|
+| authStore | user, isAuthenticated, isLoading | AsyncStorage (profile cache) |
+| booksStore | books[], currentBook | localBooksDb (AsyncStorage) |
+| entriesStore | entries[], filter, summary, hasMore, isLoadingMore | Two-cache AsyncStorage |
+| inboxStore | unreadCount | In-memory |
+| offlineStore | isOnline, pendingQueue, isSyncing | AsyncStorage (queue) |
+| themeStore | mode ('light'/'dark') | AsyncStorage |
+| todoStore | todos[], filter, searchQuery | User-specific AsyncStorage key |
 
 ---
 
-## 🔑 Environment Variables
+## Notification System
 
-```env
-EXPO_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
-EXPO_PUBLIC_SUPABASE_ANON_KEY=eyJ...
-EXPO_PUBLIC_EAS_PROJECT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+### Task Reminders (client-side, no server)
+`notificationService.scheduleAllReminders(todoId, taskText, dueDate)` schedules:
+1. `dueDate - 3min` → "⏰ Due Soon" + reminder.wav
+2. `dueDate`       → "🔔 Task Due Now" + reminder.wav
+3. `dueDate + 10min` → "📋 Task Still Pending" + reminder.wav
+
+Trigger format: `{ seconds: N, repeats: false }` — this is expo-notifications ~0.28.x.
+Do NOT use `{ type: 'timeInterval', seconds: N }` — rejected by 0.28.x with TypeError.
+
+cancelTaskReminder(todoId) cancels by matching `notification.content.data.todoId`.
+
+### Entry & Invitation Notifications (server-side)
+```
+DB change
+  → notify_push_trigger() [AFTER trigger on entries/invitations]
+    → pgmq.send('push_notifications', payload)  [audit trail]
+    → process_push_message(payload)              [immediate call]
+      → for each member (excluding actor via auth.uid()):
+        → send_expo_push(token, title, body)
+          → net.http_post('https://exp.host/--/api/v2/push/send')
 ```
 
-Supabase Edge Function secrets (set via `supabase secrets set`):
+Check pg_net responses: `SELECT id, status_code, content FROM net._http_response ORDER BY created DESC LIMIT 10;`
+
+---
+
+## Build Reference
+
+```bash
+# Dev
+npx expo start
+
+# Local debug APK
+npx expo prebuild --platform android --clean
+cd android && ./gradlew assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+
+# Watch push logs
+adb logcat -c && adb logcat | grep "\[Push\]\|\[Auth\]"
+
+# EAS preview APK
+eas build --platform android --profile preview
+
+# EAS production AAB (Play Store)
+eas build --platform android --profile production
+
+# Check pgmq queue
+# In Supabase SQL Editor:
+SELECT * FROM pgmq.q_push_notifications LIMIT 10;
+DELETE FROM pgmq.q_push_notifications;  -- clear if stuck
 ```
-RESEND_API_KEY=re_xxxx
-APP_URL=cashflow://auth/callback
-```
+
+---
+
+## Known Production Issues and Fixes
+
+| Issue | Root Cause | Fix |
+|---|---|---|
+| Export returns only 30 entries | Shared cache key between display and full export | Two separate cache keys |
+| Book creation RLS error | auth.uid() null during SecureStore async read | create_book() SECURITY DEFINER RPC |
+| Logout when offline | SIGNED_OUT fires on token refresh failure | Check cache before clearing auth state |
+| Own notification on delete | user_id is creator not actor | Use auth.uid() in DB trigger |
+| SectionList blank after scroll | getItemLayout offsets ignore section headers | Remove getItemLayout entirely |
+| Release build reminders broken | ProGuard strips expo-notifications alarm classes | -keep class expo.modules.notifications.** |
+| Push token not saving | RLS silent fail (0 rows updated, no error) | save_push_token() SECURITY DEFINER RPC |
+| Reminder TypeError | { type: 'timeInterval' } not valid in ~0.28.x | Use only { seconds, repeats } |
