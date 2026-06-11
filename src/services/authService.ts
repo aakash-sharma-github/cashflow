@@ -7,6 +7,7 @@ import * as WebBrowser from 'expo-web-browser'
 import * as AuthSession from 'expo-auth-session'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import type { Profile, ApiResponse } from '../types'
+import { logger } from '@/utils/logger'
 
 WebBrowser.maybeCompleteAuthSession()
 
@@ -176,7 +177,7 @@ export const authService = {
       .single()
 
     if (error) {
-      console.error('[Auth] updateProfile error:', error.message)
+      logger.error('[Auth] updateProfile error:', error.message)
       return { data: null, error: error.message }
     }
 

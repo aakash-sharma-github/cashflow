@@ -13,6 +13,7 @@
 import { create } from 'zustand'
 import type { Profile } from '../types'
 import { authService } from '../services/authService'
+import { logger } from '@/utils/logger'
 
 interface AuthState {
   user: Profile | null
@@ -106,7 +107,7 @@ export const useAuthStore = create<AuthState>((set) => ({
         const cached = await authService.getCachedProfile()
         if (cached) {
           // Offline token refresh failure — restore auth from cache
-          console.log('[Auth] SIGNED_OUT event — restoring from cache (offline?)')
+          logger.info('[Auth] SIGNED_OUT event — restoring from cache (offline?)')
           set({ user: cached, isAuthenticated: true, isLoading: false })
         } else {
           // No cache — genuine sign-out

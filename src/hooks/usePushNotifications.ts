@@ -28,6 +28,7 @@ import { useAuthStore } from '../store/authStore'
 import { useInboxStore } from '../store/inboxStore'
 import { authService } from '../services/authService'
 import supabase from '../services/supabase'
+import { logger } from '@/utils/logger'
 
 // ── Push token registration ───────────────────────────────────
 // Registers an ExponentPushToken with Expo's push service.
@@ -36,13 +37,13 @@ import supabase from '../services/supabase'
 // pgmq trigger can look it up when sending push notifications.
 async function registerPushToken(userId: string): Promise<void> {
   if (!Device.isDevice) {
-    console.log('[Push] Skipping token registration — not a real device')
+    logger.info('[Push] Skipping token registration — not a real device')
     return
   }
 
   const granted = await notificationService.hasPermission()
   if (!granted) {
-    console.log('[Push] Skipping token registration — no permission')
+    logger.info('[Push] Skipping token registration — no permission')
     return
   }
 
@@ -52,7 +53,7 @@ async function registerPushToken(userId: string): Promise<void> {
       Constants.easConfig?.projectId
 
     if (!projectId || projectId === 'your-eas-project-id') {
-      console.error(
+      logger.error(
         '[Push] ❌ EAS Project ID not set.\n' +
         'Run: eas init\n' +
         'This writes expo.extra.eas.projectId in app.json.'
@@ -63,7 +64,7 @@ async function registerPushToken(userId: string): Promise<void> {
     const result = await Notifications.getExpoPushTokenAsync({ projectId })
     const token = result.data  // ExponentPushToken[xxxx...]
 
-    console.log('[Push] ✅ Token obtained:', token.slice(0, 42) + '...')
+    logger.info('[Push] ✅ Token obtained:', token.slice(0, 42) + '...')
 
     // Use SECURITY DEFINER RPC to save push token — bypasses RLS timing issues
     // where getUser() succeeds but the JWT in the client may be stale
@@ -71,14 +72,14 @@ async function registerPushToken(userId: string): Promise<void> {
       p_token: token,
     })
     if (rpcError) {
-      console.error('[Push] ❌ save_push_token RPC failed:', rpcError.message)
+      logger.error('[Push] ❌ save_push_token RPC failed:', rpcError.message)
       // Fallback: try direct update
       await authService.updateProfile({ push_token: token })
     } else {
-      console.log('[Push] ✅ Token saved to profiles.push_token via RPC')
+      logger.info('[Push] ✅ Token saved to profiles.push_token via RPC')
     }
   } catch (e) {
-    console.error(
+    logger.error(
       '[Push] ❌ getExpoPushTokenAsync failed.\n' +
       'If you see FCM credential errors, run:\n' +
       '  eas credentials (Android → FCM API Key → upload your server key)\n' +
@@ -140,7 +141,7 @@ export function usePushNotifications() {
         }
       )
       .subscribe((status) => {
-        console.log('[Push] Invitation subscription:', status)
+        logger.info('[Push] Invitation subscription:', status)
       })
 
     return () => { supabase.removeChannel(channel) }

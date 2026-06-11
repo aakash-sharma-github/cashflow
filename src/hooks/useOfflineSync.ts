@@ -12,6 +12,7 @@ import { useAuthStore } from '../store/authStore'
 import { useBooksStore } from '../store/booksStore'
 import { useEntriesStore } from '../store/entriesStore'
 import { syncService } from '../services/syncService'
+import { logger } from '@/utils/logger'
 
 export function useOfflineSync() {
   const { initNetworkListener, isOnline, pendingQueue, syncQueue, isSyncing } = useOfflineStore()
@@ -25,7 +26,7 @@ export function useOfflineSync() {
   const runSync = useCallback(async () => {
     if (!user || !isOnline || pendingQueue.length === 0 || isSyncing) return
 
-    console.log('[Sync] Running sync of', pendingQueue.length, 'queued operations')
+    logger.info('[Sync] Running sync of', pendingQueue.length, 'queued operations')
 
     await syncQueue(async (ops) => {
       return syncService.replayQueue(ops, user.id)

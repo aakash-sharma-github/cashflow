@@ -1,6 +1,7 @@
 // src/services/invitationsService.ts
 import supabase from './supabase'
 import type { Invitation, BookMember, ApiResponse } from '../types'
+import { logger } from '@/utils/logger'
 
 export const invitationsService = {
   /**
@@ -60,7 +61,7 @@ export const invitationsService = {
         inviterName: profile?.full_name || profile?.email || 'Someone',
         inviteeEmail,
       },
-    }).catch(console.error)
+    }).catch(logger.error)
 
     return { data: invitation, error: null }
   },

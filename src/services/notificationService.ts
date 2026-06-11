@@ -11,6 +11,7 @@
 import * as Notifications from 'expo-notifications'
 import * as Device from 'expo-device'
 import { Platform } from 'react-native'
+import { logger } from '@/utils/logger'
 
 // ── CRITICAL: must be at module level, not inside any function ─
 Notifications.setNotificationHandler({
@@ -55,7 +56,7 @@ export const notificationService = {
         // On Android emulator Device.isDevice is false — skip entirely
         // On real Android devices this is always true
         if (Platform.OS === 'android' && !Device.isDevice) {
-            console.log('[Push] Skipping setup — not a real device')
+            logger.info('[Push] Skipping setup — not a real device')
             _permGranted = false
             return false
         }
@@ -74,14 +75,14 @@ export const notificationService = {
                     enableVibrate: true,
                     sound: 'invitation',  // maps to assets/sounds/invitation.wav
                 })
-                console.log('[Push] Channel created: invitations')
+                logger.info('[Push] Channel created: invitations')
 
                 await Notifications.setNotificationChannelAsync(CH.entries, {
                     name: 'Entry Changes',
                     importance: Notifications.AndroidImportance.HIGH,
                     enableVibrate: true,
                 })
-                console.log('[Push] Channel created: entries')
+                logger.info('[Push] Channel created: entries')
 
                 await Notifications.setNotificationChannelAsync(CH.reminders, {
                     name: 'Task Reminders',
@@ -92,9 +93,9 @@ export const notificationService = {
                     enableVibrate: true,
                     sound: 'reminder',  // maps to assets/sounds/reminder.wav
                 })
-                console.log('[Push] Channel created: reminders')
+                logger.info('[Push] Channel created: reminders')
             } catch (e) {
-                console.error('[Push] Channel creation failed:', e)
+                logger.error('[Push] Channel creation failed:', e)
                 // Don't return here — permission request can still succeed
             }
         }
@@ -102,23 +103,23 @@ export const notificationService = {
         // ── Step 2: Request permission ────────────────────────────
         try {
             const { status: current } = await Notifications.getPermissionsAsync()
-            console.log('[Push] Current permission status:', current)
+            logger.info('[Push] Current permission status:', current)
 
             if (current === 'granted') {
                 _permGranted = true
                 _setupDone = true
-                console.log('[Push] Permission already granted ✅')
+                logger.info('[Push] Permission already granted ✅')
                 return true
             }
 
             const { status: requested } = await Notifications.requestPermissionsAsync()
-            console.log('[Push] Requested permission, result:', requested)
+            logger.info('[Push] Requested permission, result:', requested)
 
             _permGranted = requested === 'granted'
             _setupDone = _permGranted
             return _permGranted
         } catch (e) {
-            console.error('[Push] Permission request failed:', e)
+            logger.error('[Push] Permission request failed:', e)
             _permGranted = false
             return false
         }
@@ -134,12 +135,12 @@ export const notificationService = {
     // Call this from SettingsScreen to verify the whole pipeline.
     // ─────────────────────────────────────────────────────────────
     async debugTest(): Promise<void> {
-        console.log('[Push] Running debug test...')
+        logger.info('[Push] Running debug test...')
 
         const perm = await notificationService.setup()
-        console.log('[Push] Permission granted:', perm)
+        logger.info('[Push] Permission granted:', perm)
         if (!perm) {
-            console.error('[Push] ❌ No permission — go to Android Settings > Apps > CashFlow > Notifications > Enable')
+            logger.error('[Push] ❌ No permission — go to Android Settings > Apps > CashFlow > Notifications > Enable')
             return
         }
 
@@ -153,10 +154,10 @@ export const notificationService = {
                 },
                 trigger: { seconds: 3, repeats: false },
             })
-            console.log('[Push] ✅ Test notification scheduled with id:', id)
-            console.log('[Push] Minimize the app now — notification will appear in 3 seconds')
+            logger.info('[Push] ✅ Test notification scheduled with id:', id)
+            logger.info('[Push] Minimize the app now — notification will appear in 3 seconds')
         } catch (e) {
-            console.error('[Push] ❌ scheduleNotificationAsync FAILED:', e)
+            logger.error('[Push] ❌ scheduleNotificationAsync FAILED:', e)
         }
     },
 
@@ -176,9 +177,9 @@ export const notificationService = {
                 },
                 trigger: null,
             })
-            console.log('[Push] Invitation notification sent, id:', id)
+            logger.info('[Push] Invitation notification sent, id:', id)
         } catch (e) {
-            console.error('[Push] sendInvitationNotification error:', e)
+            logger.error('[Push] sendInvitationNotification error:', e)
         }
     },
 
@@ -209,7 +210,7 @@ export const notificationService = {
                 trigger: null,
             })
         } catch (e) {
-            console.error('[Push] sendEntryAddedNotification error:', e)
+            logger.error('[Push] sendEntryAddedNotification error:', e)
         }
     },
 
@@ -227,7 +228,7 @@ export const notificationService = {
                 trigger: null,
             })
         } catch (e) {
-            console.error('[Push] sendEntryEditedNotification error:', e)
+            logger.error('[Push] sendEntryEditedNotification error:', e)
         }
     },
 
@@ -245,7 +246,7 @@ export const notificationService = {
                 trigger: null,
             })
         } catch (e) {
-            console.error('[Push] sendEntryDeletedNotification error:', e)
+            logger.error('[Push] sendEntryDeletedNotification error:', e)
         }
     },
 
@@ -298,7 +299,7 @@ export const notificationService = {
 
             // Skip if time has already passed
             if (secsFromNow <= 0) {
-                console.log(`[Push] Skipping "${type}" — time already passed (${secsFromNow}s)`)
+                logger.info(`[Push] Skipping "${type}" — time already passed (${secsFromNow}s)`)
                 return null
             }
 
@@ -318,10 +319,10 @@ export const notificationService = {
                         repeats: false,
                     },
                 })
-                console.log(`[Push] ✅ "${type}" scheduled in ${secsFromNow}s, id: ${id}`)
+                logger.info(`[Push] ✅ "${type}" scheduled in ${secsFromNow}s, id: ${id}`)
                 return id
             } catch (e) {
-                console.error(`[Push] ❌ "${type}" schedule FAILED:`, e)
+                logger.error(`[Push] ❌ "${type}" schedule FAILED:`, e)
                 return null
             }
         }
@@ -355,7 +356,7 @@ export const notificationService = {
         )
         if (id3) ids.push(id3)
 
-        console.log(`[Push] Scheduled ${ids.length} reminder(s) for task: "${taskText}"`)
+        logger.info(`[Push] Scheduled ${ids.length} reminder(s) for task: "${taskText}"`)
         return ids
     },
 
@@ -379,10 +380,10 @@ export const notificationService = {
             const toCancel = scheduled.filter(n => n.content.data?.todoId === todoId)
             if (toCancel.length > 0) {
                 await Promise.all(toCancel.map(n => Notifications.cancelScheduledNotificationAsync(n.identifier)))
-                console.log('[Push] Cancelled', toCancel.length, 'reminder(s) for todo:', todoId)
+                logger.info('[Push] Cancelled', toCancel.length, 'reminder(s) for todo:', todoId)
             }
         } catch (e) {
-            console.error('[Push] cancelTaskReminder error:', e)
+            logger.error('[Push] cancelTaskReminder error:', e)
         }
     },
 

@@ -4,6 +4,7 @@
 //
 // Deploy: supabase functions deploy send-push-notification
 
+import { logger } from '@/utils/logger'
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
@@ -29,7 +30,7 @@ async function sendExpoPush(messages: object[]) {
         body: JSON.stringify(messages),
     })
     const json = await res.json()
-    console.log('[send-push] Expo API response:', JSON.stringify(json))
+    logger.info('[send-push] Expo API response:', JSON.stringify(json))
     return json
 }
 
@@ -38,7 +39,7 @@ serve(async (req: Request) => {
 
     try {
         const payload = await req.json()
-        console.log('[send-push] Received webhook:', JSON.stringify(payload).slice(0, 300))
+        logger.info('[send-push] Received webhook:', JSON.stringify(payload).slice(0, 300))
 
         const supabase = createClient(
             Deno.env.get('SUPABASE_URL')!,
@@ -50,7 +51,7 @@ serve(async (req: Request) => {
         const row = payload.record ?? payload.old_record
 
         if (!row) {
-            console.log('[send-push] No row data in payload')
+            logger.info('[send-push] No row data in payload')
             return new Response('no row', { status: 200 })
         }
 
@@ -62,13 +63,13 @@ serve(async (req: Request) => {
             // Book name
             const { data: book, error: bookErr } = await supabase
                 .from('books').select('name').eq('id', bookId).single()
-            if (bookErr) console.error('[send-push] book lookup error:', bookErr)
+            if (bookErr) logger.error('[send-push] book lookup error:', bookErr)
             const bookName = book?.name ?? 'your book'
 
             // Actor name
             const { data: actor, error: actorErr } = await supabase
                 .from('profiles').select('full_name, email').eq('id', actorUserId).single()
-            if (actorErr) console.error('[send-push] actor lookup error:', actorErr)
+            if (actorErr) logger.error('[send-push] actor lookup error:', actorErr)
             const actorName = actor?.full_name || actor?.email?.split('@')[0] || 'A member'
 
             // All OTHER members with tokens — use explicit select, no implicit join
@@ -78,14 +79,14 @@ serve(async (req: Request) => {
                 .eq('book_id', bookId)
                 .neq('user_id', actorUserId)
 
-            if (memErr) console.error('[send-push] memberships error:', memErr)
+            if (memErr) logger.error('[send-push] memberships error:', memErr)
             if (!memberships?.length) {
-                console.log('[send-push] No other members in book', bookId)
+                logger.info('[send-push] No other members in book', bookId)
                 return new Response('no other members', { status: 200 })
             }
 
             const memberIds = memberships.map(m => m.user_id)
-            console.log('[send-push] Other members:', memberIds)
+            logger.info('[send-push] Other members:', memberIds)
 
             // Get tokens in a separate query (more reliable than join)
             const { data: profiles, error: profErr } = await supabase
@@ -94,10 +95,10 @@ serve(async (req: Request) => {
                 .in('id', memberIds)
                 .not('push_token', 'is', null)
 
-            if (profErr) console.error('[send-push] profiles error:', profErr)
+            if (profErr) logger.error('[send-push] profiles error:', profErr)
 
             const tokens = (profiles ?? []).filter(p => !!p.push_token)
-            console.log('[send-push] Tokens found:', tokens.length, 'of', memberIds.length, 'members')
+            logger.info('[send-push] Tokens found:', tokens.length, 'of', memberIds.length, 'members')
 
             if (!tokens.length) {
                 return new Response('no push tokens found', { status: 200 })
@@ -157,11 +158,11 @@ serve(async (req: Request) => {
             const { data: invitee, error: invErr } = await supabase
                 .from('profiles').select('push_token').eq('email', inviteeEmail).single()
 
-            if (invErr) console.error('[send-push] invitee lookup error:', invErr)
+            if (invErr) logger.error('[send-push] invitee lookup error:', invErr)
 
             const token = invitee?.push_token
             if (!token) {
-                console.log('[send-push] Invitee has no push token:', inviteeEmail)
+                logger.info('[send-push] Invitee has no push token:', inviteeEmail)
                 return new Response('invitee has no push token', { status: 200 })
             }
 
@@ -181,11 +182,11 @@ serve(async (req: Request) => {
             })
         }
 
-        console.log('[send-push] Unhandled event:', eventType, table)
+        logger.info('[send-push] Unhandled event:', eventType, table)
         return new Response('unhandled event', { status: 200 })
 
     } catch (e) {
-        console.error('[send-push] Unhandled error:', e)
+        logger.error('[send-push] Unhandled error:', e)
         return new Response(JSON.stringify({ error: String(e) }), {
             status: 500,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },

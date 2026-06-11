@@ -27,4 +27,20 @@ config.transformer = {
   }),
 }
 
+
+config.transformer.minifierConfig = {
+  keep_classnames: true,
+  keep_fnames: true,
+  mangle: { keep_classnames: true, keep_fnames: true },
+  output: {
+    ascii_only: true,
+    quote_style: 3,
+    wrap_iife: true,
+  },
+  // Drop console calls entirely from the production bundle
+  compress: {
+    drop_console: !process.env.APP_ENV || process.env.APP_ENV === 'production',
+  },
+}
+
 module.exports = config
