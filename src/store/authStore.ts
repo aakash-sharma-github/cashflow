@@ -1,19 +1,30 @@
 // src/store/authStore.ts
-// CRITICAL FIX: initialize() must ALWAYS set isLoading=false.
-// Previous bug: if getSession() or getProfile() threw an unexpected error
-// that wasn't caught by the inner try/catch (e.g., network timeout during
-// session refresh, or Supabase client crash), isLoading stayed true forever
-// → splash screen freeze.
 //
-// Fixes applied:
-// 1. Outer try/finally guarantees isLoading=false no matter what
-// 2. Hard timeout on the whole initialize() — after 8s force isLoading=false
-// 3. Auth state listener registered OUTSIDE the try block so it always fires
+// OFFLINE AUTH STRATEGY:
+//
+// Problem: Supabase JWTs expire after 1 hour. When the app is opened after
+// being offline for hours, supabase.auth.getSession() tries to refresh the JWT.
+// With no internet, the refresh fails and getSession() returns null — not an
+// error, just null. The previous code saw null and logged the user out.
+//
+// Fix: A three-layer fallback in initialize():
+//   Layer 1: getSession() succeeds (JWT valid or refresh worked) → normal flow
+//   Layer 2: getSession() returns null BUT we have a cached profile → stay logged in
+//   Layer 3: getSession() throws → catch block checks cache → stay logged in
+//
+// The cached profile is written to AsyncStorage on every successful login and
+// profile refresh. AsyncStorage survives app restarts and never expires.
+// The user is only truly logged out when they explicitly tap Sign Out, which
+// clears the cache first.
+//
+// This means: as long as the user has signed in at least once, they will
+// NEVER be logged out by lack of internet, regardless of how long the JWT
+// has been expired or how long the phone has been offline.
 
 import { create } from 'zustand'
 import type { Profile } from '../types'
 import { authService } from '../services/authService'
-import { logger } from '@/utils/logger'
+import { logger } from '../utils/logger'
 
 interface AuthState {
   user: Profile | null
@@ -34,39 +45,59 @@ export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
 
   initialize: async () => {
-    // Hard timeout — unblock app after 8 seconds if something hangs
+    // Hard timeout — never block the app longer than 8 seconds on startup
     const timeout = setTimeout(() => {
-      set({ user: null, isAuthenticated: false, isLoading: false })
+      // On timeout, try to recover from cache before giving up
+      authService.getCachedProfile().then(cached => {
+        if (cached) {
+          set({ user: cached, isAuthenticated: true, isLoading: false })
+        } else {
+          set({ user: null, isAuthenticated: false, isLoading: false })
+        }
+      }).catch(() => {
+        set({ user: null, isAuthenticated: false, isLoading: false })
+      })
     }, 8000)
 
     try {
-      // Step 1: Check if we have a local session (works offline — session is
-      // stored in SecureStore by the Supabase client)
+      // ── Layer 1: Try to get a valid session (reads from SecureStore,
+      // attempts token refresh if JWT expired) ────────────────────────
       const session = await authService.getSession()
 
       if (session) {
-        // Step 2: Try to load profile (uses cache fallback when offline)
+        // Session is valid — try to load profile from network or cache
         const { data: profile } = await authService.getProfile()
         if (profile) {
-          // Authenticated — either from network or local cache
           set({ user: profile, isAuthenticated: true, isLoading: false })
         } else {
-          // Session exists but no profile (rare) — check cache directly
+          // Profile fetch failed but session is valid — use cache
           const cached = await authService.getCachedProfile()
           if (cached) {
             set({ user: cached, isAuthenticated: true, isLoading: false })
           } else {
-            // No profile anywhere — treat as not authenticated
             set({ user: null, isAuthenticated: false, isLoading: false })
           }
         }
+
       } else {
-        // No local session at all — must log in
-        set({ user: null, isAuthenticated: false, isLoading: false })
+        // ── Layer 2: No session returned (JWT expired + no internet for refresh)
+        // Check if we have a cached profile. If yes, the user was previously
+        // authenticated and is offline — keep them logged in.
+        // This is the main offline-after-long-sleep fix.
+        const cached = await authService.getCachedProfile()
+        if (cached) {
+          logger.info('[Auth] No session (offline/expired) — restoring from cached profile')
+          set({ user: cached, isAuthenticated: true, isLoading: false })
+        } else {
+          // No session AND no cache — genuinely not logged in
+          set({ user: null, isAuthenticated: false, isLoading: false })
+        }
       }
+
     } catch (e) {
-      // If getSession() itself throws (should be rare — it reads from SecureStore),
-      // fall back to the cached profile to avoid logging the user out offline
+      // ── Layer 3: getSession() itself threw — SecureStore locked or crashed
+      // Still try the cache before logging out
+      logger.warn('[Auth] initialize() error — falling back to cache:', e)
       try {
         const cached = await authService.getCachedProfile()
         if (cached) {
@@ -81,41 +112,44 @@ export const useAuthStore = create<AuthState>((set) => ({
       clearTimeout(timeout)
     }
 
-    // Auth state listener — handles sign-in events (online) and explicit sign-out
+    // ── Auth state listener ─────────────────────────────────────────
+    // Handles events AFTER initialization (sign-in, token refresh, sign-out)
     authService.onAuthStateChange(async (event, session) => {
+
       if (event === 'SIGNED_IN' && session) {
+        // Fresh sign-in — load profile from network and cache it
         setTimeout(async () => {
           try {
             const { data: profile } = await authService.getProfile()
-            set({ user: profile, isAuthenticated: true, isLoading: false })
+            if (profile) set({ user: profile, isAuthenticated: true, isLoading: false })
           } catch {
             set({ isAuthenticated: true, isLoading: false })
           }
         }, 500)
 
       } else if (event === 'TOKEN_REFRESHED') {
-        // JWT refreshed silently — no action needed
+        // JWT silently refreshed — no UI change needed
+        logger.info('[Auth] Token refreshed silently')
 
       } else if (event === 'SIGNED_OUT') {
-        // CRITICAL: Supabase fires SIGNED_OUT both when:
-        //   (a) user explicitly signs out — should log out ✅
-        //   (b) token refresh fails (no internet) — should NOT log out ❌
+        // Supabase fires SIGNED_OUT for TWO different reasons:
+        //   (a) Explicit signOut() call — user tapped Sign Out → SHOULD log out
+        //   (b) Token refresh failed while app was backgrounded → should NOT log out
         //
-        // Distinguish by checking if we have a cached profile AND no session.
-        // If there is a cached profile, the user was previously authenticated
-        // and is likely just offline — keep them logged in from cache.
+        // We distinguish them by checking the profile cache:
+        //   - signOut() clears the cache BEFORE calling supabase.auth.signOut()
+        //     so by the time this event fires, getCachedProfile() returns null → log out
+        //   - Token refresh failure leaves the cache intact → restore from cache
         const cached = await authService.getCachedProfile()
         if (cached) {
-          // Offline token refresh failure — restore auth from cache
-          logger.info('[Auth] SIGNED_OUT event — restoring from cache (offline?)')
+          logger.info('[Auth] SIGNED_OUT (token refresh failure) — restoring from cache')
           set({ user: cached, isAuthenticated: true, isLoading: false })
         } else {
-          // No cache — genuine sign-out
+          // Cache was cleared by explicit signOut() — proceed with logout
           set({ user: null, isAuthenticated: false, isLoading: false })
         }
 
       } else if (event === 'USER_UPDATED') {
-        // Profile was updated — refresh local copy
         try {
           const { data: profile } = await authService.getProfile()
           if (profile) set({ user: profile })
@@ -151,10 +185,10 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   signOut: async () => {
-    // Clear cache FIRST so the SIGNED_OUT auth event handler
-    // finds no cached profile and proceeds with the actual logout.
-    // If we clear after, there's a race where the event fires before
-    // the cache is cleared and the user stays logged in.
+    // MUST clear cache BEFORE calling supabase.auth.signOut()
+    // The SIGNED_OUT event fires ~immediately after signOut() is called.
+    // If we clear cache after, there's a race where the listener sees the
+    // cache and thinks it's an offline scenario — keeping the user logged in.
     await authService.setCachedProfile(null)
     await authService.signOut()
     set({ user: null, isAuthenticated: false })
