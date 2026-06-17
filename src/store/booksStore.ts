@@ -1,22 +1,30 @@
-// src/store/booksStore.ts  (offline-first)
-import { create } from 'zustand'
-import type { Book, BookFormData } from '../types'
-import { booksService } from '../services/booksService'
-import { localBooksDb } from '../services/localDb'
-import { useOfflineStore } from './offlineStore'
-import { useAuthStore } from './authStore'
+// src/store/booksStore.ts
+// Cache-first strategy:
+//   1. Load from localBooksDb immediately → instant UI, always works offline
+//   2. If online, fetch from server in background → update UI silently
+//   3. If server fetch fails → keep cache showing, never blank screen
 
-const genTempId = () => `local_${Date.now()}_${Math.random().toString(36).slice(2)}`
+import { create } from 'zustand'
+import { booksService } from '../services/booksService'
+import { useAuthStore } from './authStore'
+import { useOfflineStore } from './offlineStore'
+import { localBooksDb } from '../services/localDb'
+import type { Book, BookFormData } from '../types'
+import { logger } from '../utils/logger'
+
+const genTempId = () =>
+  `local_${Date.now()}_${Math.random().toString(36).slice(2, 14)}`
 
 interface BooksState {
   books: Book[]
+  currentBook: Book | null
   isLoading: boolean
   error: string | null
-  currentBook: Book | null
+
   fetchBooks: () => Promise<void>
   fetchBook: (id: string) => Promise<void>
-  createBook: (formData: BookFormData) => Promise<{ error: string | null; book?: Book }>
-  updateBook: (id: string, updates: Partial<BookFormData>) => Promise<{ error: string | null }>
+  createBook: (formData: BookFormData) => Promise<{ data: Book | null; error: string | null }>
+  updateBook: (id: string, formData: Partial<BookFormData>) => Promise<{ error: string | null }>
   deleteBook: (id: string) => Promise<{ error: string | null }>
   setCurrentBook: (book: Book | null) => void
   updateBookBalance: (id: string, delta: { cash_in?: number; cash_out?: number }) => void
@@ -24,51 +32,74 @@ interface BooksState {
 
 export const useBooksStore = create<BooksState>((set, get) => ({
   books: [],
+  currentBook: null,
   isLoading: false,
   error: null,
-  currentBook: null,
 
+  // ── fetchBooks ─────────────────────────────────────────────────
+  // Step 1: Serve from local cache instantly (zero waiting)
+  // Step 2: If online, refresh in background and update silently
   fetchBooks: async () => {
     const userId = useAuthStore.getState().user?.id
-    set({ isLoading: true, error: null })
+    if (!userId) return
+
+    // ── Step 1: Load cache immediately ──────────────────────────
+    const cached = await localBooksDb.getAll(userId)
+    set({ books: cached, isLoading: cached.length === 0, error: null })
+
+    // ── Step 2: Background network refresh ──────────────────────
     const { isOnline } = useOfflineStore.getState()
-
     if (!isOnline) {
-      const local = userId ? await localBooksDb.getAll(userId) : []
-      set({ books: local, isLoading: false })
+      set({ isLoading: false })
       return
     }
 
-    const { data, error } = await booksService.getBooks()
-    if (error) {
-      // Graceful fallback to local cache
-      const local = userId ? await localBooksDb.getAll(userId) : []
-      set({ books: local.length ? local : [], isLoading: false, error })
-      return
+    try {
+      const { data, error } = await booksService.getBooks()
+      if (error || !data) {
+        // Network failed — cache is already showing, just stop loading
+        logger.warn('[Books] fetchBooks network error:', error)
+        set({ isLoading: false })
+        return
+      }
+      await localBooksDb.save(userId, data)
+      set({ books: data, isLoading: false, error: null })
+    } catch (e) {
+      // Any failure — cache already visible, nothing to do
+      logger.warn('[Books] fetchBooks exception:', e)
+      set({ isLoading: false })
     }
-    if (userId && data) await localBooksDb.save(userId, data)
-    set({ books: data ?? [], isLoading: false, error: null })
   },
 
+  // ── fetchBook ──────────────────────────────────────────────────
   fetchBook: async (id) => {
     const userId = useAuthStore.getState().user?.id
     const { isOnline } = useOfflineStore.getState()
 
-    if (!isOnline) {
-      const local = userId ? await localBooksDb.getAll(userId) : []
-      const book = local.find(b => b.id === id)
-      if (book) set({ currentBook: book })
-      return
+    // Step 1: Serve from cache immediately
+    if (userId) {
+      const all = await localBooksDb.getAll(userId)
+      const cached = all.find(b => b.id === id)
+      if (cached) set({ currentBook: cached })
     }
 
-    const { data } = await booksService.getBook(id)
-    if (data) {
-      set({ currentBook: data })
-      set(state => ({ books: state.books.map(b => b.id === id ? data : b) }))
-      if (userId) await localBooksDb.upsert(userId, data)
+    if (!isOnline) return
+
+    // Step 2: Background refresh
+    try {
+      const { data } = await booksService.getBook(id)
+      if (data) {
+        set({ currentBook: data })
+        // Also update the book in the list
+        set(state => ({ books: state.books.map(b => b.id === id ? data : b) }))
+        if (userId) await localBooksDb.upsert(userId, data)
+      }
+    } catch (e) {
+      logger.warn('[Books] fetchBook exception:', e)
     }
   },
 
+  // ── createBook ─────────────────────────────────────────────────
   createBook: async (formData) => {
     const userId = useAuthStore.getState().user?.id!
     const { isOnline, enqueue } = useOfflineStore.getState()
@@ -91,77 +122,65 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       member_count: 1,
     }
 
-    // Optimistic UI
+    // Optimistic UI — show immediately
     set(state => ({ books: [optimistic, ...state.books] }))
     await localBooksDb.upsert(userId, optimistic)
 
     if (!isOnline) {
-      await enqueue({
-        id: `op_${id}`,
-        type: 'CREATE_BOOK',
-        payload: {
-          tempId: id,
-          name: optimistic.name,
-          description: optimistic.description,
-          color: optimistic.color,
-          currency: optimistic.currency,
-        },
-      })
-      return { error: null, book: optimistic }
+      await enqueue({ id: `op_${id}`, type: 'CREATE_BOOK', payload: { tempId: id, ...formData } })
+      return { data: optimistic, error: null }
     }
 
     const { data, error } = await booksService.createBook(formData)
-    if (error) {
-      set(state => ({ books: state.books.filter(b => b.id !== id) }))
-      await localBooksDb.remove(userId, id)
-      return { error }
+    if (error || !data) {
+      // Online but request failed — queue for retry
+      await enqueue({ id: `op_${id}`, type: 'CREATE_BOOK', payload: { tempId: id, ...formData } })
+      return { data: optimistic, error: null }
     }
 
-    const real: Book = { ...data!, role: 'owner', balance: 0, cash_in: 0, cash_out: 0, member_count: 1 }
+    // Replace optimistic with real server data
+    const real = { ...data, role: 'owner' as const }
     set(state => ({ books: state.books.map(b => b.id === id ? real : b) }))
-    await localBooksDb.remove(userId, id)
     await localBooksDb.upsert(userId, real)
-    return { error: null, book: real }
+    await localBooksDb.remove(userId, id)
+    return { data: real, error: null }
   },
 
-  updateBook: async (id, updates) => {
+  // ── updateBook ─────────────────────────────────────────────────
+  updateBook: async (id, formData) => {
     const userId = useAuthStore.getState().user?.id!
     const { isOnline, enqueue } = useOfflineStore.getState()
-    const prev = get().books.find(b => b.id === id)
 
-    // Optimistic
+    // Optimistic update
     set(state => ({
-      books: state.books.map(b => b.id === id ? { ...b, ...updates } : b),
-      currentBook: state.currentBook?.id === id
-        ? { ...state.currentBook, ...updates }
-        : state.currentBook,
+      books: state.books.map(b => b.id === id ? { ...b, ...formData } : b),
+      currentBook: state.currentBook?.id === id ? { ...state.currentBook, ...formData } : state.currentBook,
     }))
-    if (prev) await localBooksDb.upsert(userId, { ...prev, ...updates } as Book)
+    if (userId) {
+      const all = await localBooksDb.getAll(userId)
+      await localBooksDb.save(userId, all.map(b => b.id === id ? { ...b, ...formData } : b))
+    }
 
     if (!isOnline) {
-      await enqueue({
-        id: `op_upd_${id}_${Date.now()}`,
-        type: 'UPDATE_BOOK',
-        payload: { bookId: id, ...updates },
-      })
+      await enqueue({ id: `op_upd_${id}_${Date.now()}`, type: 'UPDATE_BOOK', payload: { bookId: id, ...formData } })
       return { error: null }
     }
 
-    const { error } = await booksService.updateBook(id, updates)
-    if (error && prev) {
-      set(state => ({ books: state.books.map(b => b.id === id ? prev : b) }))
-      await localBooksDb.upsert(userId, prev)
+    const { error } = await booksService.updateBook(id, formData)
+    if (error) {
+      await enqueue({ id: `op_upd_${id}_${Date.now()}`, type: 'UPDATE_BOOK', payload: { bookId: id, ...formData } })
     }
-    return { error: error ?? null }
+    return { error: null }
   },
 
+  // ── deleteBook ─────────────────────────────────────────────────
   deleteBook: async (id) => {
     const userId = useAuthStore.getState().user?.id!
     const { isOnline, enqueue } = useOfflineStore.getState()
-    const prev = get().books.find(b => b.id === id)
 
+    // Optimistic remove
     set(state => ({ books: state.books.filter(b => b.id !== id) }))
-    await localBooksDb.remove(userId, id)
+    if (userId) await localBooksDb.remove(userId, id)
 
     if (!isOnline) {
       await enqueue({ id: `op_del_${id}`, type: 'DELETE_BOOK', payload: { bookId: id } })
@@ -169,11 +188,10 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     }
 
     const { error } = await booksService.deleteBook(id)
-    if (error && prev) {
-      set(state => ({ books: [prev, ...state.books] }))
-      await localBooksDb.upsert(userId, prev)
+    if (error) {
+      await enqueue({ id: `op_del_${id}`, type: 'DELETE_BOOK', payload: { bookId: id } })
     }
-    return { error: error ?? null }
+    return { error: null }
   },
 
   setCurrentBook: (book) => set({ currentBook: book }),

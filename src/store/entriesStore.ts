@@ -75,52 +75,63 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
 
   fetchEntries: async (bookId, reset = true) => {
     const userId = useAuthStore.getState().user?.id;
-    if (!userId) {
-      set({ isLoading: false });
-      return;
-    } // guard: not authenticated yet
+    if (!userId) { set({ isLoading: false }); return; }
+
     const { isOnline } = useOfflineStore.getState();
-    if (reset)
+    if (reset) set({ isLoading: true, entries: [], currentPage: 0, hasMore: true, error: null });
+
+    // ── Step 1: Load local cache immediately for instant UI ──────
+    // This runs regardless of online status so there is NEVER an empty
+    // screen while waiting for network, and offline always shows data.
+    const localEntries = await localEntriesDb.getByBook(userId, bookId);
+    const tempEntries = localEntries.filter(e => e.id.startsWith('local_'));
+    const { filter } = get();
+
+    if (localEntries.length > 0) {
+      const filtered = filter !== 'all'
+        ? localEntries.filter(e => e.type === filter)
+        : localEntries;
       set({
-        isLoading: true,
-        entries: [],
-        currentPage: 0,
-        hasMore: true,
+        entries: filtered,
+        isLoading: !isOnline ? false : true, // done loading if offline
+        summary: computeSummary(filtered),
+        hasMore: false,
         error: null,
       });
+    }
 
+    // ── Step 2: Offline — stay with cache ────────────────────────
     if (!isOnline) {
-      let local = await localEntriesDb.getByBook(userId, bookId);
-      const { filter } = get();
-      if (filter !== "all") local = local.filter((e) => e.type === filter);
-      set({
-        entries: local,
-        isLoading: false,
-        summary: computeSummary(local),
-        hasMore: false,
-      });
+      set({ isLoading: false });
       return;
     }
 
-    const { data, error } = await entriesService.getEntries(
-      bookId,
-      get().filter,
-      0,
-    );
-    const { data: summary } = await entriesService.getBookSummary(bookId);
-    const localEntries = await localEntriesDb.getByBook(userId, bookId);
-    const tempEntries = localEntries.filter((e) => e.id.startsWith("local_"));
-    const merged = [...tempEntries, ...(data ?? [])];
-    if (data)
-      await localEntriesDb.save(userId, bookId, [...tempEntries, ...data]);
-    set({
-      entries: merged,
-      isLoading: false,
-      error,
-      currentPage: 0,
-      hasMore: (data?.length ?? 0) === PAGE_SIZE,
-      summary: summary ?? computeSummary(merged),
-    });
+    // ── Step 3: Online — fetch fresh data from server ────────────
+    try {
+      const { data, error } = await entriesService.getEntries(bookId, get().filter, 0);
+      const { data: summary } = await entriesService.getBookSummary(bookId);
+
+      if (error || !data) {
+        // Network failed (expired JWT, timeout, etc.) — keep cache visible
+        set({ isLoading: false, error: null }); // don't show error — cache is shown
+        return;
+      }
+
+      // Merge: temp (offline-created) entries always show at top
+      const merged = [...tempEntries, ...data];
+      await localEntriesDb.save(userId, bookId, merged);
+      set({
+        entries: merged,
+        isLoading: false,
+        error: null,
+        currentPage: 0,
+        hasMore: data.length === PAGE_SIZE,
+        summary: summary ?? computeSummary(merged),
+      });
+    } catch {
+      // Any uncaught error — stay with whatever cache was loaded in Step 1
+      set({ isLoading: false, error: null });
+    }
   },
 
   loadMore: async (bookId) => {
@@ -202,19 +213,19 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
       entries: state.entries.map((e) => (e.id === id ? data! : e)),
       summary: state.summary
         ? {
-            ...state.summary,
-            cash_in:
-              state.summary.cash_in +
-              (formData.type === "cash_in" ? parseFloat(formData.amount) : 0),
-            cash_out:
-              state.summary.cash_out +
-              (formData.type === "cash_out" ? parseFloat(formData.amount) : 0),
-            balance:
-              state.summary.balance +
-              (formData.type === "cash_in" ? 1 : -1) *
-                parseFloat(formData.amount),
-            entry_count: state.summary.entry_count + 1,
-          }
+          ...state.summary,
+          cash_in:
+            state.summary.cash_in +
+            (formData.type === "cash_in" ? parseFloat(formData.amount) : 0),
+          cash_out:
+            state.summary.cash_out +
+            (formData.type === "cash_out" ? parseFloat(formData.amount) : 0),
+          balance:
+            state.summary.balance +
+            (formData.type === "cash_in" ? 1 : -1) *
+            parseFloat(formData.amount),
+          entry_count: state.summary.entry_count + 1,
+        }
         : null,
     }));
     await localEntriesDb.remove(userId, bookId, id);
@@ -306,18 +317,18 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
     set((state) => ({
       summary: state.summary
         ? {
-            ...state.summary,
-            cash_in:
-              state.summary.cash_in -
-              (existing.type === "cash_in" ? existing.amount : 0),
-            cash_out:
-              state.summary.cash_out -
-              (existing.type === "cash_out" ? existing.amount : 0),
-            balance:
-              state.summary.balance +
-              (existing.type === "cash_in" ? -1 : 1) * existing.amount,
-            entry_count: Math.max(0, state.summary.entry_count - 1),
-          }
+          ...state.summary,
+          cash_in:
+            state.summary.cash_in -
+            (existing.type === "cash_in" ? existing.amount : 0),
+          cash_out:
+            state.summary.cash_out -
+            (existing.type === "cash_out" ? existing.amount : 0),
+          balance:
+            state.summary.balance +
+            (existing.type === "cash_in" ? -1 : 1) * existing.amount,
+          entry_count: Math.max(0, state.summary.entry_count - 1),
+        }
         : null,
     }));
     return { error: null };

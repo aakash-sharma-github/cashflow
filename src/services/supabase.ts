@@ -14,6 +14,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import * as SecureStore from 'expo-secure-store'
+import { logger } from '../utils/logger'
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY
@@ -92,7 +93,7 @@ const ChunkedSecureStore = {
         3000, undefined
       )
     } catch (e) {
-      console.warn('[SecureStore] setItem failed:', e)
+      logger.warn('[SecureStore] setItem failed:', e)
     }
   },
 
@@ -116,12 +117,25 @@ const ChunkedSecureStore = {
   },
 }
 
+// Custom fetch with 10-second timeout so offline API calls fail fast
+// instead of hanging for the OS default (can be 2+ minutes on Android).
+// This prevents the app from appearing frozen when opening offline.
+const fetchWithTimeout: typeof fetch = (input, init) => {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 10000)
+  return fetch(input, { ...init, signal: controller.signal })
+    .finally(() => clearTimeout(timer))
+}
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     storage: ChunkedSecureStore,
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
+  },
+  global: {
+    fetch: fetchWithTimeout,
   },
 })
 
