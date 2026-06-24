@@ -38,10 +38,11 @@ function AppContent() {
         // Request notification permission at app boot — before auth
         // This ensures channels are created and permission is granted early
         notificationService.setup().catch(() => { })
+        // Hide native splash as soon as React is mounted so it transitions
+        // directly into our JS splash screen (no double splash flash)
+        SplashScreen.hideAsync().catch(() => { })
         await Promise.all([initialize(), loadTheme()])
       } catch (e) {
-        // ignore
-      } finally {
         SplashScreen.hideAsync().catch(() => { })
       }
     }

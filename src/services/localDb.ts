@@ -3,89 +3,154 @@
 // Mirrors the shape of the remote DB but stored in AsyncStorage.
 // Data is keyed by entity type + user ID to support multi-user devices.
 
-import AsyncStorage from '@react-native-async-storage/async-storage'
-import type { Book, Entry } from '../types'
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import type { Book, Entry } from "../types";
 
-const key = (namespace: string, userId: string) => `cashflow:${namespace}:${userId}`
+const key = (namespace: string, userId: string) =>
+  `cashflow:${namespace}:${userId}`;
 
 // ─── Books ──────────────────────────────────────────────────
 
 export const localBooksDb = {
   async getAll(userId: string): Promise<Book[]> {
     try {
-      const raw = await AsyncStorage.getItem(key('books', userId))
-      return raw ? JSON.parse(raw) : []
-    } catch { return [] }
+      const raw = await AsyncStorage.getItem(key("books", userId));
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
   },
 
   async save(userId: string, books: Book[]): Promise<void> {
-    await AsyncStorage.setItem(key('books', userId), JSON.stringify(books))
+    await AsyncStorage.setItem(key("books", userId), JSON.stringify(books));
   },
 
   async upsert(userId: string, book: Book): Promise<void> {
-    const all = await localBooksDb.getAll(userId)
-    const idx = all.findIndex(b => b.id === book.id)
-    if (idx >= 0) all[idx] = book
-    else all.unshift(book)
-    await localBooksDb.save(userId, all)
+    const all = await localBooksDb.getAll(userId);
+    const idx = all.findIndex((b) => b.id === book.id);
+    if (idx >= 0) all[idx] = book;
+    else all.unshift(book);
+    await localBooksDb.save(userId, all);
   },
 
   async remove(userId: string, bookId: string): Promise<void> {
-    const all = await localBooksDb.getAll(userId)
-    await localBooksDb.save(userId, all.filter(b => b.id !== bookId))
+    const all = await localBooksDb.getAll(userId);
+    await localBooksDb.save(
+      userId,
+      all.filter((b) => b.id !== bookId),
+    );
   },
-}
+};
 
 // ─── Entries ─────────────────────────────────────────────────
 
 export const localEntriesDb = {
   async getByBook(userId: string, bookId: string): Promise<Entry[]> {
     try {
-      const raw = await AsyncStorage.getItem(key(`entries:${bookId}`, userId))
-      return raw ? JSON.parse(raw) : []
-    } catch { return [] }
+      const raw = await AsyncStorage.getItem(key(`entries:${bookId}`, userId));
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
   },
 
   async save(userId: string, bookId: string, entries: Entry[]): Promise<void> {
-    await AsyncStorage.setItem(key(`entries:${bookId}`, userId), JSON.stringify(entries))
+    await AsyncStorage.setItem(
+      key(`entries:${bookId}`, userId),
+      JSON.stringify(entries),
+    );
   },
 
   async upsert(userId: string, bookId: string, entry: Entry): Promise<void> {
-    const all = await localEntriesDb.getByBook(userId, bookId)
-    const idx = all.findIndex(e => e.id === entry.id)
-    if (idx >= 0) all[idx] = entry
-    else all.unshift(entry)
+    const all = await localEntriesDb.getByBook(userId, bookId);
+    const idx = all.findIndex((e) => e.id === entry.id);
+    if (idx >= 0) all[idx] = entry;
+    else all.unshift(entry);
     // Sort by entry_date desc
-    all.sort((a, b) => new Date(b.entry_date).getTime() - new Date(a.entry_date).getTime())
-    await localEntriesDb.save(userId, bookId, all)
+    all.sort(
+      (a, b) =>
+        new Date(b.entry_date).getTime() - new Date(a.entry_date).getTime(),
+    );
+    await localEntriesDb.save(userId, bookId, all);
   },
 
   async remove(userId: string, bookId: string, entryId: string): Promise<void> {
-    const all = await localEntriesDb.getByBook(userId, bookId)
-    await localEntriesDb.save(userId, bookId, all.filter(e => e.id !== entryId))
+    const all = await localEntriesDb.getByBook(userId, bookId);
+    await localEntriesDb.save(
+      userId,
+      bookId,
+      all.filter((e) => e.id !== entryId),
+    );
   },
 
   async clearBook(userId: string, bookId: string): Promise<void> {
-    await AsyncStorage.removeItem(key(`entries:${bookId}`, userId))
+    await AsyncStorage.removeItem(key(`entries:${bookId}`, userId));
   },
-}
+};
 
 // ─── Metadata ─────────────────────────────────────────────────
 
 export const localMetaDb = {
   async getLastSync(userId: string): Promise<string | null> {
-    return AsyncStorage.getItem(key('last_sync', userId))
+    return AsyncStorage.getItem(key("last_sync", userId));
   },
   async setLastSync(userId: string, ts: string): Promise<void> {
-    await AsyncStorage.setItem(key('last_sync', userId), ts)
+    await AsyncStorage.setItem(key("last_sync", userId), ts);
   },
   async clearAll(userId: string): Promise<void> {
-    const books = await localBooksDb.getAll(userId)
+    const books = await localBooksDb.getAll(userId);
     const keys = [
-      key('books', userId),
-      key('last_sync', userId),
-      ...books.map(b => key(`entries:${b.id}`, userId)),
-    ]
-    await AsyncStorage.multiRemove(keys)
+      key("books", userId),
+      key("last_sync", userId),
+      ...books.map((b) => key(`entries:${b.id}`, userId)),
+    ];
+    await AsyncStorage.multiRemove(keys);
   },
-}
+};
+
+// ── localMembersDb ─────────────────────────────────────────────────────────
+// Stores book members and a contacts list (all users ever interacted with)
+// so members are viewable offline and invite suggestions work without network.
+export const localMembersDb = {
+  async getByBook(userId: string, bookId: string): Promise<any[]> {
+    try {
+      const raw = await AsyncStorage.getItem(key(`members:${bookId}`, userId));
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  },
+  async saveByBook(
+    userId: string,
+    bookId: string,
+    members: any[],
+  ): Promise<void> {
+    try {
+      await AsyncStorage.setItem(
+        key(`members:${bookId}`, userId),
+        JSON.stringify(members),
+      );
+    } catch {}
+  },
+  // Contacts = all unique emails ever seen across all books (for invite suggestions)
+  async getContacts(userId: string): Promise<string[]> {
+    try {
+      const raw = await AsyncStorage.getItem(key("contacts", userId));
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  },
+  async addContacts(userId: string, emails: string[]): Promise<void> {
+    try {
+      const existing = await localMembersDb.getContacts(userId);
+      const merged = Array.from(
+        new Set([...existing, ...emails.filter((e) => !!e)]),
+      );
+      await AsyncStorage.setItem(
+        key("contacts", userId),
+        JSON.stringify(merged),
+      );
+    } catch {}
+  },
+};

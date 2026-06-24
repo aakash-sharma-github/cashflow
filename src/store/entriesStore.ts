@@ -49,6 +49,11 @@ interface EntriesState {
 }
 
 function computeSummary(entries: Entry[]) {
+  // Guard against NaN — amount may be string or undefined in temp/offline entries
+  const toNum = (v: any) => {
+    const n = Number(v);
+    return isNaN(n) ? 0 : n;
+  };
   const cash_in = entries
     .filter((e) => e.type === "cash_in")
     .reduce((s, e) => s + Number(e.amount), 0);
@@ -75,22 +80,37 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
 
   fetchEntries: async (bookId, reset = true) => {
     const userId = useAuthStore.getState().user?.id;
-    if (!userId) { set({ isLoading: false }); return; }
+    if (!userId) {
+      set({ isLoading: false });
+      return;
+    }
 
     const { isOnline } = useOfflineStore.getState();
-    if (reset) set({ isLoading: true, entries: [], currentPage: 0, hasMore: true, error: null });
+    // CRITICAL: Clear entries immediately on reset so the previous book's
+    // entries never show while new book's cache/data is loading
+    if (reset) {
+      set({
+        entries: [],
+        isLoading: true,
+        currentPage: 0,
+        hasMore: true,
+        error: null,
+        summary: null,
+      });
+    }
 
     // ── Step 1: Load local cache immediately for instant UI ──────
     // This runs regardless of online status so there is NEVER an empty
     // screen while waiting for network, and offline always shows data.
     const localEntries = await localEntriesDb.getByBook(userId, bookId);
-    const tempEntries = localEntries.filter(e => e.id.startsWith('local_'));
+    const tempEntries = localEntries.filter((e) => e.id.startsWith("local_"));
     const { filter } = get();
 
     if (localEntries.length > 0) {
-      const filtered = filter !== 'all'
-        ? localEntries.filter(e => e.type === filter)
-        : localEntries;
+      const filtered =
+        filter !== "all"
+          ? localEntries.filter((e) => e.type === filter)
+          : localEntries;
       set({
         entries: filtered,
         isLoading: !isOnline ? false : true, // done loading if offline
@@ -108,7 +128,11 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
 
     // ── Step 3: Online — fetch fresh data from server ────────────
     try {
-      const { data, error } = await entriesService.getEntries(bookId, get().filter, 0);
+      const { data, error } = await entriesService.getEntries(
+        bookId,
+        get().filter,
+        0,
+      );
       const { data: summary } = await entriesService.getBookSummary(bookId);
 
       if (error || !data) {
@@ -213,19 +237,19 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
       entries: state.entries.map((e) => (e.id === id ? data! : e)),
       summary: state.summary
         ? {
-          ...state.summary,
-          cash_in:
-            state.summary.cash_in +
-            (formData.type === "cash_in" ? parseFloat(formData.amount) : 0),
-          cash_out:
-            state.summary.cash_out +
-            (formData.type === "cash_out" ? parseFloat(formData.amount) : 0),
-          balance:
-            state.summary.balance +
-            (formData.type === "cash_in" ? 1 : -1) *
-            parseFloat(formData.amount),
-          entry_count: state.summary.entry_count + 1,
-        }
+            ...state.summary,
+            cash_in:
+              state.summary.cash_in +
+              (formData.type === "cash_in" ? parseFloat(formData.amount) : 0),
+            cash_out:
+              state.summary.cash_out +
+              (formData.type === "cash_out" ? parseFloat(formData.amount) : 0),
+            balance:
+              state.summary.balance +
+              (formData.type === "cash_in" ? 1 : -1) *
+                parseFloat(formData.amount),
+            entry_count: state.summary.entry_count + 1,
+          }
         : null,
     }));
     await localEntriesDb.remove(userId, bookId, id);
@@ -317,18 +341,18 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
     set((state) => ({
       summary: state.summary
         ? {
-          ...state.summary,
-          cash_in:
-            state.summary.cash_in -
-            (existing.type === "cash_in" ? existing.amount : 0),
-          cash_out:
-            state.summary.cash_out -
-            (existing.type === "cash_out" ? existing.amount : 0),
-          balance:
-            state.summary.balance +
-            (existing.type === "cash_in" ? -1 : 1) * existing.amount,
-          entry_count: Math.max(0, state.summary.entry_count - 1),
-        }
+            ...state.summary,
+            cash_in:
+              state.summary.cash_in -
+              (existing.type === "cash_in" ? existing.amount : 0),
+            cash_out:
+              state.summary.cash_out -
+              (existing.type === "cash_out" ? existing.amount : 0),
+            balance:
+              state.summary.balance +
+              (existing.type === "cash_in" ? -1 : 1) * existing.amount,
+            entry_count: Math.max(0, state.summary.entry_count - 1),
+          }
         : null,
     }));
     return { error: null };

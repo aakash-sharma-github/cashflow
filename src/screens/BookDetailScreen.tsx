@@ -227,6 +227,7 @@ export default function BookDetailScreen({ route, navigation }: any) {
       fetchBook(bookId);
       setSelectMode(false);
       setSelected(new Set());
+      setPreviewEntry(null);
     }, [bookId]),
   );
 
@@ -285,7 +286,8 @@ export default function BookDetailScreen({ route, navigation }: any) {
             onPress: () =>
               themedAlert(
                 "Delete Entry",
-                `Remove ${formatAmount(e.amount, currentBook?.currency)}${e.note ? ` "${e.note}"` : ""
+                `Remove ${formatAmount(e.amount, currentBook?.currency)}${
+                  e.note ? ` "${e.note}"` : ""
                 }?`,
                 [
                   { text: "Cancel", style: "cancel" },
@@ -629,11 +631,12 @@ export default function BookDetailScreen({ route, navigation }: any) {
           keyExtractor={keyExtractor}
           renderItem={renderItem}
           renderSectionHeader={renderSectionHeader}
-          maxToRenderPerBatch={10}
-          updateCellsBatchingPeriod={50}
-          initialNumToRender={15}
+          maxToRenderPerBatch={8}
+          updateCellsBatchingPeriod={100}
+          initialNumToRender={10}
           windowSize={5}
-          removeClippedSubviews={true}
+          removeClippedSubviews={false}
+          stickySectionHeadersEnabled={false}
           onEndReached={onEndReached}
           onEndReachedThreshold={0.3}
           ListFooterComponent={
@@ -665,7 +668,6 @@ export default function BookDetailScreen({ route, navigation }: any) {
           }
           contentContainerStyle={s.list}
           showsVerticalScrollIndicator={false}
-          stickySectionHeadersEnabled
           refreshControl={
             <RefreshControl
               refreshing={refreshing}

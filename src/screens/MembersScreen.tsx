@@ -14,6 +14,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { invitationsService } from "../services/invitationsService";
+import { localMembersDb } from '../services/localDb';
 import { useBooksStore } from "../store/booksStore";
 import { useAuthStore } from "../store/authStore";
 import { useThemeStore, getTheme } from "../store/themeStore";
@@ -54,16 +55,44 @@ export default function MembersScreen({ route }: any) {
   const [inviteEmail, setInviteEmail] = useState("");
   const [emailFocused, setEmailFocused] = useState(false);
   const [sending, setSending] = useState(false);
+  const [contacts, setContacts] = useState<string[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   const isOwner = currentBook?.role === "owner";
 
   const load = useCallback(async () => {
+    const currentUserId = useAuthStore.getState().user?.id
     const [mRes, iRes] = await Promise.all([
       invitationsService.getBookMembers(bookId),
       invitationsService.getBookInvitations(bookId),
     ]);
-    if (mRes.data) setMembers(mRes.data);
-    if (iRes.data) setInvitations(iRes.data);
+    if (mRes.data) {
+      setMembers(mRes.data)
+      // Cache members locally for offline use
+      if (currentUserId) {
+        await localMembersDb.saveByBook(currentUserId, bookId, mRes.data)
+        // Add all member emails to contacts for invite suggestions
+        const emails = mRes.data.map((m: any) => m.email).filter(Boolean)
+        await localMembersDb.addContacts(currentUserId, emails)
+      }
+    } else if (currentUserId) {
+      // Offline: load from local cache
+      const cached = await localMembersDb.getByBook(currentUserId, bookId)
+      if (cached.length > 0) setMembers(cached)
+    }
+    if (iRes.data) {
+      setInvitations(iRes.data)
+      // Add invitee emails to contacts
+      if (currentUserId) {
+        const emails = iRes.data.map((inv: any) => inv.invitee_email).filter(Boolean)
+        await localMembersDb.addContacts(currentUserId, emails)
+      }
+    }
+    // Load contacts for invite suggestions
+    if (currentUserId) {
+      const savedContacts = await localMembersDb.getContacts(currentUserId)
+      setContacts(savedContacts)
+    }
     setLoading(false);
   }, [bookId]);
 
@@ -331,14 +360,17 @@ export default function MembersScreen({ route }: any) {
               <TextInput
                 style={[s.inviteInput, { color: theme.text }]}
                 value={inviteEmail}
-                onChangeText={setInviteEmail}
+                onChangeText={(text) => {
+                  setInviteEmail(text)
+                  setShowSuggestions(text.length > 0)
+                }}
+                onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
                 placeholder="colleague@example.com"
                 placeholderTextColor={theme.textTertiary}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
                 onFocus={() => setEmailFocused(true)}
-                onBlur={() => setEmailFocused(false)}
                 onSubmitEditing={handleSendInvite}
                 returnKeyType="send"
               />
@@ -360,6 +392,34 @@ export default function MembersScreen({ route }: any) {
               </LinearGradient>
             </TouchableOpacity>
           </View>
+          {/* Contact suggestions */}
+          {showSuggestions && contacts.filter(c =>
+            c.toLowerCase().includes(inviteEmail.toLowerCase()) &&
+            c !== useAuthStore.getState().user?.email
+          ).length > 0 && (
+              <View style={[s.suggestionsBox, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                {contacts
+                  .filter(c =>
+                    c.toLowerCase().includes(inviteEmail.toLowerCase()) &&
+                    c !== useAuthStore.getState().user?.email
+                  )
+                  .slice(0, 5)
+                  .map(email => (
+                    <TouchableOpacity
+                      key={email}
+                      style={[s.suggestionRow, { borderBottomColor: theme.border }]}
+                      onPress={() => {
+                        setInviteEmail(email)
+                        setShowSuggestions(false)
+                      }}
+                    >
+                      <Ionicons name="person-outline" size={13} color={theme.textTertiary} />
+                      <Text style={[s.suggestionText, { color: theme.text }]} numberOfLines={1}>{email}</Text>
+                    </TouchableOpacity>
+                  ))
+                }
+              </View>
+            )}
         </View>
       )}
 
@@ -526,6 +586,24 @@ const s = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 20,
   },
+  suggestionsBox: {
+    position: "absolute",
+    top: 88,
+    left: SPACING.md,
+    right: SPACING.md,
+    borderRadius: BORDER_RADIUS.md,
+    borderWidth: 1,
+    maxHeight: 150,
+    zIndex: 10,
+  },
+  suggestionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.md,
+    borderBottomWidth: 1,
+  },
+  suggestionText: { marginLeft: SPACING.sm, fontSize: FONT_SIZE.sm },
   roleText: { fontSize: FONT_SIZE.xs, fontWeight: "700" },
   statusPill: {
     flexDirection: "row",
