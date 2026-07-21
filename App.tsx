@@ -11,6 +11,7 @@ import { useTodoStore } from './src/store/todoStore'
 import { useOfflineSync } from './src/hooks/useOfflineSync'
 import { usePushNotifications } from './src/hooks/usePushNotifications'
 import { ThemedAlertProvider } from './src/components/common/ThemedAlert'
+import { InteractionManager } from 'react-native'
 import { notificationService } from './src/services/notificationService'
 
 // Keep the native splash visible until we explicitly hide it
@@ -35,13 +36,17 @@ function AppContent() {
   useEffect(() => {
     const boot = async () => {
       try {
-        // Request notification permission at app boot — before auth
-        // This ensures channels are created and permission is granted early
-        notificationService.setup().catch(() => { })
-        // Hide native splash as soon as React is mounted so it transitions
-        // directly into our JS splash screen (no double splash flash)
+        // Hide native splash immediately — JS splash takes over
         SplashScreen.hideAsync().catch(() => { })
+
+        // Critical path: auth + theme only — show the app as fast as possible
         await Promise.all([initialize(), loadTheme()])
+
+        // Non-critical: defer notification setup until after first frame is drawn
+        // This prevents notification channel setup from blocking the UI
+        InteractionManager.runAfterInteractions(() => {
+          notificationService.setup().catch(() => { })
+        })
       } catch (e) {
         SplashScreen.hideAsync().catch(() => { })
       }

@@ -51,15 +51,15 @@ interface EntriesState {
 function computeSummary(entries: Entry[]) {
   // Guard against NaN — amount may be string or undefined in temp/offline entries
   const toNum = (v: any) => {
-    const n = Number(v);
-    return isNaN(n) ? 0 : n;
-  };
+    const n = Number(v)
+    return isNaN(n) ? 0 : n
+  }
   const cash_in = entries
     .filter((e) => e.type === "cash_in")
-    .reduce((s, e) => s + Number(e.amount), 0);
+    .reduce((s, e) => s + toNum(e.amount), 0);
   const cash_out = entries
     .filter((e) => e.type === "cash_out")
-    .reduce((s, e) => s + Number(e.amount), 0);
+    .reduce((s, e) => s + toNum(e.amount), 0);
   return {
     cash_in,
     cash_out,
@@ -80,43 +80,32 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
 
   fetchEntries: async (bookId, reset = true) => {
     const userId = useAuthStore.getState().user?.id;
-    if (!userId) {
-      set({ isLoading: false });
-      return;
-    }
+    if (!userId) { set({ isLoading: false }); return; }
 
     const { isOnline } = useOfflineStore.getState();
     // CRITICAL: Clear entries immediately on reset so the previous book's
     // entries never show while new book's cache/data is loading
     if (reset) {
-      set({
-        entries: [],
-        isLoading: true,
-        currentPage: 0,
-        hasMore: true,
-        error: null,
-        summary: null,
-      });
+      set({ entries: [], isLoading: true, currentPage: 0, hasMore: true, error: null, summary: null })
     }
 
     // ── Step 1: Load local cache immediately for instant UI ──────
     // This runs regardless of online status so there is NEVER an empty
     // screen while waiting for network, and offline always shows data.
     const localEntries = await localEntriesDb.getByBook(userId, bookId);
-    const tempEntries = localEntries.filter((e) => e.id.startsWith("local_"));
-    const { filter } = get();
+    const tempEntries  = localEntries.filter(e => e.id.startsWith('local_'));
+    const { filter }   = get();
 
     if (localEntries.length > 0) {
-      const filtered =
-        filter !== "all"
-          ? localEntries.filter((e) => e.type === filter)
-          : localEntries;
+      const filtered = filter !== 'all'
+        ? localEntries.filter(e => e.type === filter)
+        : localEntries;
       set({
         entries: filtered,
         isLoading: !isOnline ? false : true, // done loading if offline
-        summary: computeSummary(filtered),
-        hasMore: false,
-        error: null,
+        summary:  computeSummary(filtered),
+        hasMore:  false,
+        error:    null,
       });
     }
 
@@ -128,11 +117,7 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
 
     // ── Step 3: Online — fetch fresh data from server ────────────
     try {
-      const { data, error } = await entriesService.getEntries(
-        bookId,
-        get().filter,
-        0,
-      );
+      const { data, error } = await entriesService.getEntries(bookId, get().filter, 0);
       const { data: summary } = await entriesService.getBookSummary(bookId);
 
       if (error || !data) {
@@ -145,12 +130,12 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
       const merged = [...tempEntries, ...data];
       await localEntriesDb.save(userId, bookId, merged);
       set({
-        entries: merged,
-        isLoading: false,
-        error: null,
+        entries:     merged,
+        isLoading:   false,
+        error:       null,
         currentPage: 0,
-        hasMore: data.length === PAGE_SIZE,
-        summary: summary ?? computeSummary(merged),
+        hasMore:     data.length === PAGE_SIZE,
+        summary:     summary ?? computeSummary(merged),
       });
     } catch {
       // Any uncaught error — stay with whatever cache was loaded in Step 1
@@ -202,7 +187,10 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
         ? { cash_in: parseFloat(formData.amount) }
         : { cash_out: parseFloat(formData.amount) };
 
-    set((state) => ({ entries: [optimistic, ...state.entries] }));
+    set((state) => {
+      const next = [optimistic, ...state.entries]
+      return { entries: next, summary: computeSummary(next) }
+    })
     await localEntriesDb.upsert(userId, bookId, optimistic);
     useBooksStore.getState().updateBookBalance(bookId, delta);
 
@@ -224,7 +212,10 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
 
     const { data, error } = await entriesService.createEntry(bookId, formData);
     if (error) {
-      set((state) => ({ entries: state.entries.filter((e) => e.id !== id) }));
+      set((state) => {
+        const next = state.entries.filter((e) => e.id !== id)
+        return { entries: next, summary: computeSummary(next) }
+      });
       await localEntriesDb.remove(userId, bookId, id);
       const r =
         formData.type === "cash_in"
@@ -235,6 +226,7 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
     }
     set((state) => ({
       entries: state.entries.map((e) => (e.id === id ? data! : e)),
+        summary: computeSummary(state.entries.map((e) => (e.id === id ? data! : e))),
       summary: state.summary
         ? {
             ...state.summary,
@@ -276,6 +268,7 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
     };
     set((state) => ({
       entries: state.entries.map((e) => (e.id === id ? updated : e)),
+        summary: computeSummary(state.entries.map((e) => (e.id === id ? updated : e))),
     }));
     await localEntriesDb.upsert(userId, bookId, updated as Entry);
     if (!isOnline) {

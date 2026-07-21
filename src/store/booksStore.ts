@@ -27,7 +27,6 @@ interface BooksState {
   updateBook: (id: string, formData: Partial<BookFormData>) => Promise<{ error: string | null }>
   deleteBook: (id: string) => Promise<{ error: string | null }>
   setCurrentBook: (book: Book | null) => void
-  updateBookBalance: (id: string, delta: { cash_in?: number; cash_out?: number }) => void
 }
 
 export const useBooksStore = create<BooksState>((set, get) => ({
@@ -57,15 +56,19 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     try {
       const { data, error } = await booksService.getBooks()
       if (error || !data) {
-        // Network failed — cache is already showing, just stop loading
-        logger.warn('[Books] fetchBooks network error:', error)
+        // Check if error is auth-related — if so, don't log as network error
+        // (this is expected when Supabase client hasn't hydrated JWT yet)
+        if (error?.includes('Not authenticated') || error?.includes('JWT')) {
+          logger.info('[Books] fetchBooks: auth not ready yet — showing cached books')
+        } else {
+          logger.warn('[Books] fetchBooks network error:', error)
+        }
         set({ isLoading: false })
         return
       }
       await localBooksDb.save(userId, data)
       set({ books: data, isLoading: false, error: null })
     } catch (e) {
-      // Any failure — cache already visible, nothing to do
       logger.warn('[Books] fetchBooks exception:', e)
       set({ isLoading: false })
     }
@@ -195,18 +198,4 @@ export const useBooksStore = create<BooksState>((set, get) => ({
   },
 
   setCurrentBook: (book) => set({ currentBook: book }),
-
-  updateBookBalance: (id, delta) => {
-    set(state => {
-      const update = (book: Book): Book => {
-        const newCashIn = (book.cash_in || 0) + (delta.cash_in || 0)
-        const newCashOut = (book.cash_out || 0) + (delta.cash_out || 0)
-        return { ...book, cash_in: newCashIn, cash_out: newCashOut, balance: newCashIn - newCashOut }
-      }
-      return {
-        books: state.books.map(b => b.id === id ? update(b) : b),
-        currentBook: state.currentBook?.id === id ? update(state.currentBook) : state.currentBook,
-      }
-    })
-  },
 }))

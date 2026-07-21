@@ -80,17 +80,43 @@ export const useAuthStore = create<AuthState>((set) => ({
         }
 
       } else {
-        // ── Layer 2: No session returned (JWT expired + no internet for refresh)
-        // Check if we have a cached profile. If yes, the user was previously
-        // authenticated and is offline — keep them logged in.
-        // This is the main offline-after-long-sleep fix.
-        const cached = await authService.getCachedProfile()
-        if (cached) {
-          logger.info('[Auth] No session (offline/expired) — restoring from cached profile')
-          set({ user: cached, isAuthenticated: true, isLoading: false })
+        // ── Layer 2: getSession() returned null
+        // This happens when:
+        //   (a) JWT expired AND no internet for refresh — user is offline
+        //   (b) ChunkedSecureStore read is still in progress (race condition)
+        //
+        // For (b): retry getSession() after 800ms to let SecureStore finish
+        // For (a): fall back to cached profile
+
+        // Retry once — solves the race condition where SecureStore
+        // hasn't finished loading by the time getSession() is first called
+        await new Promise(r => setTimeout(r, 800))
+        const retrySession = await authService.getSession()
+
+        if (retrySession) {
+          // SecureStore just needed more time — session is now valid
+          logger.info('[Auth] Session loaded on retry (SecureStore was still reading)')
+          const { data: profile } = await authService.getProfile()
+          if (profile) {
+            set({ user: profile, isAuthenticated: true, isLoading: false })
+          } else {
+            const cached = await authService.getCachedProfile()
+            set({ user: cached, isAuthenticated: !!cached, isLoading: false })
+          }
         } else {
-          // No session AND no cache — genuinely not logged in
-          set({ user: null, isAuthenticated: false, isLoading: false })
+          // Genuinely no session — check cache for offline recovery
+          const cached = await authService.getCachedProfile()
+          if (cached) {
+            logger.info('[Auth] No session (offline/expired) — restoring from cached profile')
+            // NOTE: The Supabase client will NOT have a valid JWT in this state.
+            // API calls will fail with "Not authenticated" until connectivity
+            // is restored and the client can refresh the token.
+            // booksStore and entriesStore handle this gracefully by showing
+            // cached local data when network calls fail.
+            set({ user: cached, isAuthenticated: true, isLoading: false })
+          } else {
+            set({ user: null, isAuthenticated: false, isLoading: false })
+          }
         }
       }
 

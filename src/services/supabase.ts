@@ -117,12 +117,18 @@ const ChunkedSecureStore = {
   },
 }
 
-// Custom fetch with 10-second timeout so offline API calls fail fast
-// instead of hanging for the OS default (can be 2+ minutes on Android).
-// This prevents the app from appearing frozen when opening offline.
+// Custom fetch with adaptive timeout:
+//   - Auth token refresh calls: 5 seconds (fail fast, fall back to cache)
+//   - All other API calls: 10 seconds
+// This prevents the app appearing frozen when offline while still giving
+// data calls enough time to complete on slow connections.
 const fetchWithTimeout: typeof fetch = (input, init) => {
+  const url = typeof input === 'string' ? input : (input as Request).url
+  const isAuth = url.includes('/auth/v1/token') || url.includes('/auth/v1/user')
+  const ms = isAuth ? 5000 : 10000
+
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 10000)
+  const timer = setTimeout(() => controller.abort(), ms)
   return fetch(input, { ...init, signal: controller.signal })
     .finally(() => clearTimeout(timer))
 }

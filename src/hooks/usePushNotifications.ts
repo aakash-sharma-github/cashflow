@@ -28,7 +28,7 @@ import { useAuthStore } from '../store/authStore'
 import { useInboxStore } from '../store/inboxStore'
 import { authService } from '../services/authService'
 import supabase from '../services/supabase'
-import { logger } from '@/utils/logger'
+import { logger } from '../utils/logger'
 
 // ── Push token registration ───────────────────────────────────
 // Registers an ExponentPushToken with Expo's push service.
@@ -68,15 +68,22 @@ async function registerPushToken(userId: string): Promise<void> {
 
     // Use SECURITY DEFINER RPC to save push token — bypasses RLS timing issues
     // where getUser() succeeds but the JWT in the client may be stale
-    const { error: rpcError } = await supabase.rpc('save_push_token', {
-      p_token: token,
-    })
-    if (rpcError) {
-      logger.error('[Push] ❌ save_push_token RPC failed:', rpcError.message)
-      // Fallback: try direct update
+    // Retry token save up to 3 times with 2s delays
+    // The Supabase client may not have set JWT headers yet on first call
+    let saved = false
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const { error: rpcError } = await supabase.rpc('save_push_token', { p_token: token })
+      if (!rpcError) {
+        logger.info('[Push] ✅ Token saved to profiles.push_token via RPC (attempt', attempt, ')')
+        saved = true
+        break
+      }
+      logger.warn('[Push] save_push_token attempt', attempt, 'failed:', rpcError.message)
+      if (attempt < 3) await new Promise(r => setTimeout(r, 2000))
+    }
+    if (!saved) {
+      // Final fallback: direct update
       await authService.updateProfile({ push_token: token })
-    } else {
-      logger.info('[Push] ✅ Token saved to profiles.push_token via RPC')
     }
   } catch (e) {
     logger.error(
@@ -166,4 +173,50 @@ export function usePushNotifications() {
     })
     return unsub
   }, [user?.id])
+
+  // Handle notification TAP — navigate to the relevant screen
+  // Uses Notifications.useLastNotificationResponse() pattern to also handle
+  // taps that launched the app from a killed state
+  useEffect(() => {
+    // Listener for taps while app is open or backgrounded
+    const sub = Notifications.addNotificationResponseReceivedListener(response => {
+      const data = response.notification.request.content.data as any
+      handleNotificationNavigation(data)
+    })
+    return () => sub.remove()
+  }, [isAuthenticated])
+
+  // Handle tap that cold-launched the app (app was killed)
+  useEffect(() => {
+    if (!isAuthenticated) return
+    Notifications.getLastNotificationResponseAsync().then(response => {
+      if (!response) return
+      const data = response.notification.request.content.data as any
+      // Small delay to let navigation stack initialize
+      setTimeout(() => handleNotificationNavigation(data), 500)
+    })
+  }, [isAuthenticated])
+}
+
+// Navigate based on notification data payload
+function handleNotificationNavigation(data: any) {
+  if (!data) return
+  const type = data.type as string
+  const bookId = data.bookId as string | undefined
+
+  try {
+    // Import navigationRef lazily to avoid circular dependency
+    const { navigationRef } = require('../navigation')
+    if (!navigationRef?.current?.isReady?.()) return
+
+    if ((type === 'entry_added' || type === 'entry_updated' || type === 'entry_deleted') && bookId) {
+      // Navigate to the book so user can see the entry change
+      navigationRef.current.navigate('BookDetail', { bookId })
+    } else if (type === 'invitation') {
+      // Navigate to notifications/inbox screen
+      navigationRef.current.navigate('Notifications')
+    }
+  } catch {
+    // Navigation not ready — ignore
+  }
 }

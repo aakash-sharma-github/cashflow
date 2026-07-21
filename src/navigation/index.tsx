@@ -1,6 +1,6 @@
 // src/navigation/index.tsx
 import React from 'react'
-import { NavigationContainer, DarkTheme, DefaultTheme } from '@react-navigation/native'
+import { NavigationContainer, createNavigationContainerRef, DarkTheme, DefaultTheme } from '@react-navigation/native'
 import { createStackNavigator } from '@react-navigation/stack'
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
 import { View, Text, StyleSheet, Platform, Image } from 'react-native'
@@ -28,6 +28,7 @@ import PrivacyPolicyScreen from '../screens/PrivacyPolicyScreen'
 import TermsScreen from '../screens/TermsScreen'
 import OfflineBanner from '../components/common/OfflineBanner'
 
+export const navigationRef = createNavigationContainerRef()
 const Stack = createStackNavigator()
 const Tab = createBottomTabNavigator()
 
@@ -205,7 +206,7 @@ export default function RootNavigator() {
   }
 
   return (
-    <NavigationContainer theme={navTheme}>
+    <NavigationContainer ref={navigationRef} theme={navTheme}>
       {isAuthenticated ? <AppStack /> : <AuthStack />}
     </NavigationContainer>
   )
