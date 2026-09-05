@@ -25,6 +25,9 @@ build/
 # Development Builds
 ios/
 
+# testing
+__tests__/
+
 # Development based md files
 google-play-key.json
 production.md
@@ -39,6 +42,9 @@ commands.md
 cashflow-firebase.json
 oauth
 readme
+code_summary.yaml
+prompt.md
+
 
 # Metro
 .metro-health-check*
@@ -63,3 +69,5 @@ todos.txt
 
 # typescript
 *.tsbuildinfo
+
+testsprite_tests/tmp/config.json

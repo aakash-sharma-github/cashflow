@@ -93,8 +93,8 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
     // This runs regardless of online status so there is NEVER an empty
     // screen while waiting for network, and offline always shows data.
     const localEntries = await localEntriesDb.getByBook(userId, bookId);
-    const tempEntries  = localEntries.filter(e => e.id.startsWith('local_'));
-    const { filter }   = get();
+    const tempEntries = localEntries.filter(e => e.id.startsWith('local_'));
+    const { filter } = get();
 
     if (localEntries.length > 0) {
       const filtered = filter !== 'all'
@@ -103,9 +103,9 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
       set({
         entries: filtered,
         isLoading: !isOnline ? false : true, // done loading if offline
-        summary:  computeSummary(filtered),
-        hasMore:  false,
-        error:    null,
+        summary: computeSummary(filtered),
+        hasMore: false,
+        error: null,
       });
     }
 
@@ -130,12 +130,12 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
       const merged = [...tempEntries, ...data];
       await localEntriesDb.save(userId, bookId, merged);
       set({
-        entries:     merged,
-        isLoading:   false,
-        error:       null,
+        entries: merged,
+        isLoading: false,
+        error: null,
         currentPage: 0,
-        hasMore:     data.length === PAGE_SIZE,
-        summary:     summary ?? computeSummary(merged),
+        hasMore: data.length === PAGE_SIZE,
+        summary: summary ?? computeSummary(merged),
       });
     } catch {
       // Any uncaught error — stay with whatever cache was loaded in Step 1
@@ -224,26 +224,10 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
       useBooksStore.getState().updateBookBalance(bookId, r);
       return { error };
     }
-    set((state) => ({
-      entries: state.entries.map((e) => (e.id === id ? data! : e)),
-        summary: computeSummary(state.entries.map((e) => (e.id === id ? data! : e))),
-      summary: state.summary
-        ? {
-            ...state.summary,
-            cash_in:
-              state.summary.cash_in +
-              (formData.type === "cash_in" ? parseFloat(formData.amount) : 0),
-            cash_out:
-              state.summary.cash_out +
-              (formData.type === "cash_out" ? parseFloat(formData.amount) : 0),
-            balance:
-              state.summary.balance +
-              (formData.type === "cash_in" ? 1 : -1) *
-                parseFloat(formData.amount),
-            entry_count: state.summary.entry_count + 1,
-          }
-        : null,
-    }));
+    set((state) => {
+      const next = state.entries.map((e) => (e.id === id ? data! : e));
+      return { entries: next, summary: computeSummary(next) };
+    });
     await localEntriesDb.remove(userId, bookId, id);
     await localEntriesDb.upsert(userId, bookId, data!);
     return { error: null };
@@ -268,7 +252,7 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
     };
     set((state) => ({
       entries: state.entries.map((e) => (e.id === id ? updated : e)),
-        summary: computeSummary(state.entries.map((e) => (e.id === id ? updated : e))),
+      summary: computeSummary(state.entries.map((e) => (e.id === id ? updated : e))),
     }));
     await localEntriesDb.upsert(userId, bookId, updated as Entry);
     if (!isOnline) {
@@ -285,15 +269,17 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
     }
     const { data, error } = await entriesService.updateEntry(id, formData);
     if (error) {
-      set((state) => ({
-        entries: state.entries.map((e) => (e.id === id ? existing : e)),
-      }));
+      set((state) => {
+        const next = state.entries.map((e) => (e.id === id ? existing : e));
+        return { entries: next, summary: computeSummary(next) };
+      });
       await localEntriesDb.upsert(userId, bookId, existing);
       return { error };
     }
-    set((state) => ({
-      entries: state.entries.map((e) => (e.id === id ? data! : e)),
-    }));
+    set((state) => {
+      const next = state.entries.map((e) => (e.id === id ? data! : e));
+      return { entries: next, summary: computeSummary(next) };
+    });
     await localEntriesDb.upsert(userId, bookId, data!);
     useBooksStore.getState().fetchBook(bookId);
     return { error: null };
@@ -305,7 +291,10 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
     const { isOnline, enqueue } = useOfflineStore.getState();
     const existing = get().entries.find((e) => e.id === id);
     if (!existing) return { error: "Entry not found" };
-    set((state) => ({ entries: state.entries.filter((e) => e.id !== id) }));
+    set((state) => {
+      const next = state.entries.filter((e) => e.id !== id);
+      return { entries: next, summary: computeSummary(next) };
+    });
     await localEntriesDb.remove(userId, bookId, id);
     const r =
       existing.type === "cash_in"
@@ -322,7 +311,10 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
     }
     const { error } = await entriesService.deleteEntry(id);
     if (error) {
-      set((state) => ({ entries: [existing, ...state.entries] }));
+      set((state) => {
+        const next = [existing, ...state.entries];
+        return { entries: next, summary: computeSummary(next) };
+      });
       await localEntriesDb.upsert(userId, bookId, existing);
       const u =
         existing.type === "cash_in"
@@ -331,23 +323,8 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
       useBooksStore.getState().updateBookBalance(bookId, u);
       return { error };
     }
-    set((state) => ({
-      summary: state.summary
-        ? {
-            ...state.summary,
-            cash_in:
-              state.summary.cash_in -
-              (existing.type === "cash_in" ? existing.amount : 0),
-            cash_out:
-              state.summary.cash_out -
-              (existing.type === "cash_out" ? existing.amount : 0),
-            balance:
-              state.summary.balance +
-              (existing.type === "cash_in" ? -1 : 1) * existing.amount,
-            entry_count: Math.max(0, state.summary.entry_count - 1),
-          }
-        : null,
-    }));
+    // entries/summary were already updated optimistically above (line ~308);
+    // nothing further to recompute here on success.
     return { error: null };
   },
 

@@ -162,7 +162,7 @@ function AppStack() {
           options={{
             title: 'Edit Profile',
             presentation: 'modal',
-            contentStyle: { backgroundColor: theme.background },
+            cardStyle: { backgroundColor: theme.background },
             headerStyle: { backgroundColor: theme.background },
           }}
         />

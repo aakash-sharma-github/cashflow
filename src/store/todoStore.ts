@@ -102,11 +102,11 @@ export const useTodoStore = create<TodoState>((set, get) => ({
 
             // Migrate: add new fields if missing from older data
             const migrated = todos.map(t => ({
-                reminderDate: null,
-                reminderNoteId: null,
-                reminderDueId: null,
-                notes: null,
                 ...t,
+                reminderDate: t.reminderDate ?? null,
+                reminderNoteId: t.reminderNoteId ?? null,
+                reminderDueId: t.reminderDueId ?? null,
+                notes: t.notes ?? null,
             }))
 
             set({ todos: migrated, isLoaded: true })

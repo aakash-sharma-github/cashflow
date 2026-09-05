@@ -27,6 +27,10 @@ interface BooksState {
   updateBook: (id: string, formData: Partial<BookFormData>) => Promise<{ error: string | null }>
   deleteBook: (id: string) => Promise<{ error: string | null }>
   setCurrentBook: (book: Book | null) => void
+  updateBookBalance: (
+    bookId: string,
+    delta: { cash_in?: number; cash_out?: number },
+  ) => Promise<void>
 }
 
 export const useBooksStore = create<BooksState>((set, get) => ({
@@ -198,4 +202,30 @@ export const useBooksStore = create<BooksState>((set, get) => ({
   },
 
   setCurrentBook: (book) => set({ currentBook: book }),
+
+  // ── updateBookBalance ──────────────────────────────────────────
+  // Applies an incremental cash_in/cash_out delta to a single book's
+  // running totals, in both the `books` list and `currentBook` (if it
+  // matches), then persists the recomputed book to local cache.
+  // Used by entriesStore for optimistic balance updates when an entry
+  // is created/updated/deleted (and reverted if the request fails).
+  updateBookBalance: async (bookId, delta) => {
+    const userId = useAuthStore.getState().user?.id
+    const state = get()
+    const base =
+      state.books.find(b => b.id === bookId) ??
+      (state.currentBook?.id === bookId ? state.currentBook : null)
+    if (!base) return
+
+    const cash_in = (base.cash_in ?? 0) + (delta.cash_in ?? 0)
+    const cash_out = (base.cash_out ?? 0) + (delta.cash_out ?? 0)
+    const updated: Book = { ...base, cash_in, cash_out, balance: cash_in - cash_out }
+
+    set(s => ({
+      books: s.books.map(b => (b.id === bookId ? updated : b)),
+      currentBook: s.currentBook?.id === bookId ? updated : s.currentBook,
+    }))
+
+    if (userId) await localBooksDb.upsert(userId, updated)
+  },
 }))

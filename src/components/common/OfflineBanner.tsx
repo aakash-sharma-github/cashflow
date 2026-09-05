@@ -34,7 +34,6 @@ export default function OfflineBanner() {
       hideTimer.current = null
     }
 
-    const justCameOnline = !prevOnline.current === false && isOnline && prevOnline.current === false
     prevOnline.current = isOnline
 
     if (shouldShow) {

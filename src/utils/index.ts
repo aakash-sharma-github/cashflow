@@ -10,9 +10,11 @@ export function formatAmount(amount: number, currency = 'USD'): string {
     AED: 'د.إ', SAR: '﷼', NPR: 'रु', BDT: '৳',
   }
   const symbol = currencySymbols[currency] || currency
-  // No trailing zeros unless user entered decimals
-  // e.g. 500 → "500", 500.5 → "500.5", 500.50 → "500.5"
-  const abs = Math.abs(amount)
+
+  // Guard: NaN, null, undefined, Infinity all become 0
+  const safe = (typeof amount !== 'number' || !isFinite(amount)) ? 0 : amount
+
+  const abs = Math.abs(safe)
   const formatted = Number.isInteger(abs)
     ? abs.toLocaleString('en-US')
     : abs.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
