@@ -7,6 +7,7 @@ import { useOfflineStore } from "./offlineStore";
 import { useAuthStore } from "./authStore";
 import { useBooksStore } from "./booksStore";
 import { PAGE_SIZE } from "../constants";
+import { logger } from "../utils/logger";
 
 const genTempId = () =>
   `local_${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -25,6 +26,7 @@ interface EntriesState {
     cash_out: number;
     entry_count: number;
   } | null;
+  loadedBookId: string | null;
 
   fetchEntries: (bookId: string, reset?: boolean) => Promise<void>;
   loadMore: (bookId: string) => Promise<void>;
@@ -77,16 +79,31 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
   currentPage: 0,
   hasMore: true,
   summary: null,
+  loadedBookId: null,
 
   fetchEntries: async (bookId, reset = true) => {
     const userId = useAuthStore.getState().user?.id;
     if (!userId) { set({ isLoading: false }); return; }
 
     const { isOnline } = useOfflineStore.getState();
-    // CRITICAL: Clear entries immediately on reset so the previous book's
-    // entries never show while new book's cache/data is loading
+    const alreadyShowingThisBook = get().loadedBookId === bookId;
+
+    // Only blank the display when we're switching to a DIFFERENT book —
+    // that's the case that actually needs protecting (so book A's numbers
+    // never bleed into book B). Re-focusing/re-fetching the SAME book
+    // should never zero out an already-correct balance just to show a
+    // "0" placeholder for the brief moment it takes to re-read the cache
+    // or refresh from the server — that produced a guaranteed flash to
+    // $0.00 on every single open, regardless of caching, which was being
+    // mistaken for a real calculation bug.
     if (reset) {
-      set({ entries: [], isLoading: true, currentPage: 0, hasMore: true, error: null, summary: null })
+      if (alreadyShowingThisBook) {
+        set({ isLoading: true, currentPage: 0, hasMore: true, error: null });
+      } else {
+        set({ entries: [], isLoading: true, currentPage: 0, hasMore: true, error: null, summary: null, loadedBookId: bookId })
+      }
+    } else {
+      set({ loadedBookId: bookId });
     }
 
     // ── Step 1: Load local cache immediately for instant UI ──────
@@ -122,8 +139,21 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
 
       if (error || !data) {
         // Network failed (expired JWT, timeout, etc.) — keep cache visible
+        logger.warn(
+          `[Entries] fetchEntries(${bookId}) server fetch failed — keeping cached ${localEntries.length} entries visible. error=`,
+          error,
+        );
         set({ isLoading: false, error: null }); // don't show error — cache is shown
         return;
+      }
+
+      if (data.length === 0 && localEntries.length > 0) {
+        logger.warn(
+          `[Entries] fetchEntries(${bookId}) server returned 0 entries but local cache had ${localEntries.length}. ` +
+          `This usually means an RLS policy or auth/session timing issue is silently filtering rows — ` +
+          `check that the Supabase session is fully hydrated before this call, and that "Members can view entries" ` +
+          `RLS resolves auth.uid() correctly for this book.`,
+        );
       }
 
       // Merge: temp (offline-created) entries always show at top
@@ -137,8 +167,9 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
         hasMore: data.length === PAGE_SIZE,
         summary: summary ?? computeSummary(merged),
       });
-    } catch {
+    } catch (e) {
       // Any uncaught error — stay with whatever cache was loaded in Step 1
+      logger.warn(`[Entries] fetchEntries(${bookId}) threw an exception:`, e);
       set({ isLoading: false, error: null });
     }
   },
@@ -358,5 +389,6 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
       currentPage: 0,
       hasMore: true,
       summary: null,
+      loadedBookId: null,
     }),
 }));

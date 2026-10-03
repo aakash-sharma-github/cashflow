@@ -26,7 +26,6 @@ import { notificationService } from '../services/notificationService'
 import { invitationsService } from '../services/invitationsService'
 import { useAuthStore } from '../store/authStore'
 import { useInboxStore } from '../store/inboxStore'
-import { authService } from '../services/authService'
 import supabase from '../services/supabase'
 import { logger } from '../utils/logger'
 
@@ -81,10 +80,7 @@ async function registerPushToken(userId: string): Promise<void> {
       logger.warn('[Push] save_push_token attempt', attempt, 'failed:', rpcError.message)
       if (attempt < 3) await new Promise(r => setTimeout(r, 2000))
     }
-    if (!saved) {
-      // Final fallback: direct update
-      await authService.updateProfile({ push_token: token })
-    }
+    if (!saved) logger.error('[Push] Token could not be saved after retries')
   } catch (e) {
     logger.error(
       '[Push] ❌ getExpoPushTokenAsync failed.\n' +

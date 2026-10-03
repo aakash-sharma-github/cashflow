@@ -21,6 +21,7 @@ import { useEntriesStore } from "../store/entriesStore";
 import { useThemeStore, getTheme } from "../store/themeStore";
 import { COLORS, SPACING, BORDER_RADIUS, FONT_SIZE } from "../constants";
 import { isValidAmount } from "../utils";
+import { themedAlert } from "../components/common/ThemedAlert";
 import { format, isToday, isYesterday } from "date-fns";
 import type { EntryType } from "../types";
 
@@ -91,7 +92,13 @@ export default function AddEditEntryScreen({ route, navigation }: any) {
     setLoading(false);
     setLoadingNew(false);
 
-    if (error) return;
+    if (error) {
+      themedAlert(
+        isEditing ? "Couldn't Update Entry" : "Couldn't Save Entry",
+        error,
+      );
+      return;
+    }
 
     if (addNew) {
       // Reset form for new entry

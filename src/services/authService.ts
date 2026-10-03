@@ -163,16 +163,14 @@ export const authService = {
     }
   },
 
-  async updateProfile(updates: Partial<Pick<Profile, 'full_name' | 'push_token'>>): Promise<ApiResponse<Profile>> {
+  async updateProfile(updates: Partial<Pick<Profile, 'full_name'>>): Promise<ApiResponse<Profile>> {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { data: null, error: 'Not authenticated' }
 
-    // Use upsert so it always writes even if the profile row doesn't exist yet.
-    // onConflict('id') means: if a row with this id already exists, update it.
-    // This avoids the RLS silent-fail where UPDATE returns success but 0 rows updated.
     const { data, error } = await supabase
       .from('profiles')
-      .upsert({ id: user.id, ...updates }, { onConflict: 'id' })
+      .update(updates)
+      .eq('id', user.id)
       .select()
       .single()
 

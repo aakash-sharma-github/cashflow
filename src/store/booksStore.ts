@@ -48,7 +48,15 @@ export const useBooksStore = create<BooksState>((set, get) => ({
 
     // ── Step 1: Load cache immediately ──────────────────────────
     const cached = await localBooksDb.getAll(userId)
-    set({ books: cached, isLoading: cached.length === 0, error: null })
+    // Don't blank out an already-correct, already-displayed list with an
+    // empty/incomplete cache read (e.g. this read racing a fresher one
+    // from a moment ago) — only replace what's on screen if the cache
+    // actually has something, or nothing has been shown yet. Otherwise
+    // every re-focus of this screen would flash the whole list to 0
+    // for a moment even when nothing was actually stale.
+    if (cached.length > 0 || get().books.length === 0) {
+      set({ books: cached, isLoading: cached.length === 0, error: null })
+    }
 
     // ── Step 2: Background network refresh ──────────────────────
     const { isOnline } = useOfflineStore.getState()
