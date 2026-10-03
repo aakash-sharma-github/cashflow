@@ -10,6 +10,8 @@ import * as Print from 'expo-print'
 import * as DocumentPicker from 'expo-document-picker'
 import { format, parse, isValid } from 'date-fns'
 import type { Entry, Book } from '../types'
+import { addMoney, compareMoney, normalizeEntryAmount, subtractMoney, sumMoney } from '../utils/money'
+import { formatAmount } from '../utils'
 
 // ─── Helpers ─────────────────────────────────────────────────
 
@@ -38,20 +40,20 @@ export async function exportEntriesAsCSV(entries: Entry[], book: Book): Promise<
     (a, b) => new Date(b.entry_date).getTime() - new Date(a.entry_date).getTime()
   )
 
-  let balance = 0
+  let balance = '0.00'
   const rows = sorted.map(e => {
     const isCashIn = e.type === 'cash_in'
-    const amount = Number(e.amount)
-    balance += isCashIn ? amount : -amount
+    const amount = normalizeEntryAmount(e.amount) ?? '0.00'
+    balance = isCashIn ? addMoney(balance, amount) : subtractMoney(balance, amount)
     const entryBy = e.profile?.full_name || e.profile?.email || ''
     return [
       format(new Date(e.entry_date), 'dd/MMM/yyyy'),        // Date (13/Apr/2026)
       format(new Date(e.entry_date), 'hh:mm a'),            // Time (09:47 pm)
       e.note || '',                                          // Remark
       entryBy,                                              // Entry by
-      isCashIn ? amount.toFixed(2) : '',                   // Cash In
-      !isCashIn ? amount.toFixed(2) : '',                   // Cash Out
-      balance.toFixed(2),                                   // Balance
+      isCashIn ? amount : '',                               // Cash In
+      !isCashIn ? amount : '',                               // Cash Out
+      balance,                                               // Balance
     ]
   })
 
@@ -88,19 +90,19 @@ export async function exportEntriesAsPDF(entries: Entry[], book: Book): Promise<
     (a, b) => new Date(b.entry_date).getTime() - new Date(a.entry_date).getTime()
   )
 
-  const cashIn = entries.filter(e => e.type === 'cash_in').reduce((s, e) => s + Number(e.amount), 0)
-  const cashOut = entries.filter(e => e.type === 'cash_out').reduce((s, e) => s + Number(e.amount), 0)
-  const balance = cashIn - cashOut
-  const isPositive = balance >= 0
+  const cashIn = sumMoney(entries.filter(e => e.type === 'cash_in').map(e => e.amount))
+  const cashOut = sumMoney(entries.filter(e => e.type === 'cash_out').map(e => e.amount))
+  const balance = subtractMoney(cashIn, cashOut)
+  const isPositive = compareMoney(balance) >= 0
 
   // Build running balance for table
-  let running = 0
+  let running = '0.00'
   const tableRows = sorted.map(e => {
     const isCashIn = e.type === 'cash_in'
-    const amount = Number(e.amount)
-    running += isCashIn ? amount : -amount
+    const amount = normalizeEntryAmount(e.amount) ?? '0.00'
+    running = isCashIn ? addMoney(running, amount) : subtractMoney(running, amount)
     const entryBy = e.profile?.full_name || e.profile?.email || '—'
-    const runningColor = running >= 0 ? '#059669' : '#dc2626'
+    const runningColor = compareMoney(running) >= 0 ? '#059669' : '#dc2626'
 
     return `
       <tr>
@@ -111,13 +113,13 @@ export async function exportEntriesAsPDF(entries: Entry[], book: Book): Promise<
         <td class="td-remark">${e.note ? esc(e.note) : '<span class="muted">—</span>'}</td>
         <td class="td-entryby">${esc(entryBy)}</td>
         <td class="td-amount ${isCashIn ? 'cash-in' : ''}">
-          ${isCashIn ? `+${book.currency} ${amount.toFixed(2)}` : ''}
+          ${isCashIn ? `+${book.currency} ${amount}` : ''}
         </td>
         <td class="td-amount ${!isCashIn ? 'cash-out' : ''}">
-          ${!isCashIn ? `-${book.currency} ${amount.toFixed(2)}` : ''}
+          ${!isCashIn ? `-${book.currency} ${amount}` : ''}
         </td>
         <td class="td-balance" style="color:${runningColor}">
-          ${running >= 0 ? '' : '-'}${book.currency} ${Math.abs(running).toFixed(2)}
+          ${formatAmount(running, book.currency)}
         </td>
       </tr>`
   }).join('')
@@ -228,17 +230,17 @@ export async function exportEntriesAsPDF(entries: Entry[], book: Book): Promise<
   <div class="summary">
     <div class="card balance">
       <div class="card-label">Net Balance</div>
-      <div class="card-value">${isPositive ? '' : '-'}${book.currency} ${Math.abs(balance).toFixed(2)}</div>
+      <div class="card-value">${formatAmount(balance, book.currency)}</div>
       <div class="card-sub">${isPositive ? 'Positive balance' : 'Negative balance'}</div>
     </div>
     <div class="card in">
       <div class="card-label">↑ Total Cash In</div>
-      <div class="card-value">${book.currency} ${cashIn.toFixed(2)}</div>
+      <div class="card-value">${formatAmount(cashIn, book.currency)}</div>
       <div class="card-sub">${entries.filter(e => e.type === 'cash_in').length} entries</div>
     </div>
     <div class="card out">
       <div class="card-label">↓ Total Cash Out</div>
-      <div class="card-value">${book.currency} ${cashOut.toFixed(2)}</div>
+      <div class="card-value">${formatAmount(cashOut, book.currency)}</div>
       <div class="card-sub">${entries.filter(e => e.type === 'cash_out').length} entries</div>
     </div>
   </div>
@@ -279,7 +281,7 @@ export async function exportEntriesAsPDF(entries: Entry[], book: Book): Promise<
 // ─── Types ────────────────────────────────────────────────────
 
 export interface ParsedEntryRow {
-  amount: number
+  amount: string
   type: 'cash_in' | 'cash_out'
   note: string | null
   entry_date: string
@@ -289,6 +291,11 @@ export interface ImportResult {
   rows: ParsedEntryRow[]
   skipped: number
   errors: string[]
+}
+
+function parseImportedAmount(raw: string): string | null {
+  const match = /^(?:[$€£₹৳﷼]|د\.إ|रु)?\s*((?:\d{1,3}(?:,\d{2})*,\d{3}|\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)\s*$/.exec(raw.trim())
+  return match ? normalizeEntryAmount(match[1].replace(/,/g, '')) : null
 }
 
 // ─── CSV Import ───────────────────────────────────────────────
@@ -433,28 +440,30 @@ export function parseCSVContent(raw: string): ImportResult {
     // ── Parse amount and type ──
     if (isCashBookLayout) {
       // CashBook layout: separate Cash In / Cash Out columns
-      const rawIn = getCell(hasCashIn).replace(/[^0-9.]/g, '')
-      const rawOut = getCell(hasCashOut).replace(/[^0-9.]/g, '')
+      const rawIn = getCell(hasCashIn)
+      const rawOut = getCell(hasCashOut)
+      const amtIn = rawIn ? parseImportedAmount(rawIn) : null
+      const amtOut = rawOut ? parseImportedAmount(rawOut) : null
 
-      const amtIn = rawIn ? parseFloat(rawIn) : 0
-      const amtOut = rawOut ? parseFloat(rawOut) : 0
-
-      if (amtIn > 0) {
+      if (amtIn) {
         rows.push({ amount: amtIn, type: 'cash_in', note, entry_date: parsedDate.toISOString() })
-      } else if (amtOut > 0) {
+      } else if (amtOut) {
         rows.push({ amount: amtOut, type: 'cash_out', note, entry_date: parsedDate.toISOString() })
       } else {
+        if ((rawIn && rawIn.trim() !== '0') || (rawOut && rawOut.trim() !== '0')) {
+          errors.push(`Row ${i + 2}: Invalid or out-of-range amount — skipped`)
+        }
         // Both zero — could be a balance-only row (like an opening balance row), skip
         skipped++
       }
     } else {
       // Simple layout: Type + Amount columns
       const rawType = getCell(hasType).toLowerCase()
-      const rawAmount = getCell(hasAmount).replace(/[^0-9.]/g, '')
-      const amount = parseFloat(rawAmount)
+      const rawAmount = getCell(hasAmount)
+      const amount = parseImportedAmount(rawAmount)
 
-      if (isNaN(amount) || amount <= 0) {
-        errors.push(`Row ${i + 2}: Invalid amount — skipped`)
+      if (!amount) {
+        errors.push(`Row ${i + 2}: Invalid or out-of-range amount — skipped`)
         skipped++; continue
       }
 

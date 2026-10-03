@@ -17,7 +17,7 @@ import { useBooksStore } from '../store/booksStore'
 import { useThemeStore, getTheme } from '../store/themeStore'
 import { themedAlert } from '../components/common/ThemedAlert'
 import { COLORS, SPACING, BORDER_RADIUS, FONT_SIZE, SHADOW } from '../constants'
-import { formatAmount } from '../utils'
+import { formatAmount, sumMoney } from '../utils'
 import { format } from 'date-fns'
 
 export default function ExportImportScreen({ route }: any) {
@@ -135,8 +135,8 @@ export default function ExportImportScreen({ route }: any) {
     </TouchableOpacity>
   )
 
-  const previewCashIn = importPreview?.rows.filter(r => r.type === 'cash_in').reduce((s, r) => s + r.amount, 0) ?? 0
-  const previewCashOut = importPreview?.rows.filter(r => r.type === 'cash_out').reduce((s, r) => s + r.amount, 0) ?? 0
+  const previewCashIn = sumMoney(importPreview?.rows.filter(r => r.type === 'cash_in').map(r => r.amount) ?? [])
+  const previewCashOut = sumMoney(importPreview?.rows.filter(r => r.type === 'cash_out').map(r => r.amount) ?? [])
 
   return (
     <SafeAreaView style={[s.container, { backgroundColor: theme.background }]} edges={['bottom']}>

@@ -197,7 +197,7 @@ Date,Time,Remark,Entry by,Cash In,Cash Out,Balance
 
 **Aakash Sharma** · Full-Stack Developer · Dubai, UAE
 
-[aakashsharma.vercel.app](https://aakashsharma.vercel.app) · aakashsharma9855@gmail.com · [LinkedIn](https://linkedin.com/in/aakash-sharma-918447178) · [GitHub](https://github.com/aakash-sharma-github)
+[aakashsharma.com.cp](https://www.aakashsharma.com.np) · aakashsharma9855@gmail.com · [LinkedIn](https://linkedin.com/in/aakash-sharma-918447178) · [GitHub](https://github.com/aakash-sharma-github)
 
 ---
 

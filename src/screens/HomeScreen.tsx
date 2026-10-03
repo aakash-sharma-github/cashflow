@@ -14,7 +14,7 @@ import { useOfflineStore } from '../store/offlineStore'
 import { useThemeStore, getTheme } from '../store/themeStore'
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOW } from '../constants'
 import { themedAlert, themedActionSheet } from '../components/common/ThemedAlert'
-import { formatAmount, getInitials } from '../utils'
+import { compareMoney, formatAmount, getInitials, sumMoney } from '../utils'
 import type { Book } from '../types'
 
 export default function HomeScreen({ navigation }: any) {
@@ -62,9 +62,9 @@ export default function HomeScreen({ navigation }: any) {
     ])
   }
 
-  const totalBalance = books.reduce((s, b) => s + (b.balance || 0), 0)
-  const totalIn = books.reduce((s, b) => s + (b.cash_in || 0), 0)
-  const totalOut = books.reduce((s, b) => s + (b.cash_out || 0), 0)
+  const totalBalance = sumMoney(books.map((b) => b.balance ?? 0))
+  const totalIn = sumMoney(books.map((b) => b.cash_in ?? 0))
+  const totalOut = sumMoney(books.map((b) => b.cash_out ?? 0))
 
   if (isLoading && books.length === 0) {
     return (
@@ -120,7 +120,7 @@ export default function HomeScreen({ navigation }: any) {
         {/* <View style={[s.summaryCard, { backgroundColor: theme.surface }]}>
           <Text style={[s.summaryLabel, { color: theme.textSecondary }]}>Net Balance</Text>
           <Text style={[s.summaryBalance, { color: totalBalance >= 0 ? COLORS.cashIn : COLORS.cashOut }]}>
-            {totalBalance >= 0 ? '' : '-'}{formatAmount(Math.abs(totalBalance))}
+            {formatAmount(totalBalance)}
           </Text>
           <View style={[s.summaryDivider, { backgroundColor: theme.border }]} />
           <View style={s.summaryRow}>
@@ -185,7 +185,7 @@ export default function HomeScreen({ navigation }: any) {
           // This single View IS the rounded card — all rows render inside it
           <View style={[s.bookListCard, { backgroundColor: theme.surface }]}>
             {filteredBooks.map((book, index) => {
-              const isPositive = (book.balance || 0) >= 0
+              const isPositive = compareMoney(book.balance || 0) >= 0
               const hasMembers = (book.member_count || 1) > 1
               const isLast = index === filteredBooks.length - 1
 
@@ -215,8 +215,11 @@ export default function HomeScreen({ navigation }: any) {
                     </View>
 
                     {/* Balance */}
-                    <Text style={[s.rowBalance, { color: isPositive ? COLORS.cashIn : COLORS.cashOut }]}>
-                      {formatAmount(Math.abs(book.balance || 0), book.currency)}
+                    <Text
+                      accessibilityLabel={`${book.name} balance: ${isPositive ? '' : 'negative '}${formatAmount(book.balance || 0, book.currency)}`}
+                      style={[s.rowBalance, { color: isPositive ? COLORS.cashIn : COLORS.cashOut }]}
+                    >
+                      {formatAmount(book.balance || 0, book.currency)}
                     </Text>
 
                     {/* Three-dot */}

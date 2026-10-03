@@ -11,6 +11,7 @@ import { useOfflineStore } from './offlineStore'
 import { localBooksDb } from '../services/localDb'
 import type { Book, BookFormData } from '../types'
 import { logger } from '../utils/logger'
+import { addMoney, subtractMoney } from '../utils/money'
 
 const genTempId = () =>
   `local_${Date.now()}_${Math.random().toString(36).slice(2, 14)}`
@@ -29,7 +30,7 @@ interface BooksState {
   setCurrentBook: (book: Book | null) => void
   updateBookBalance: (
     bookId: string,
-    delta: { cash_in?: number; cash_out?: number },
+    delta: { cash_in?: number | string; cash_out?: number | string },
   ) => Promise<void>
 }
 
@@ -225,9 +226,9 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       (state.currentBook?.id === bookId ? state.currentBook : null)
     if (!base) return
 
-    const cash_in = (base.cash_in ?? 0) + (delta.cash_in ?? 0)
-    const cash_out = (base.cash_out ?? 0) + (delta.cash_out ?? 0)
-    const updated: Book = { ...base, cash_in, cash_out, balance: cash_in - cash_out }
+    const cash_in = addMoney(base.cash_in ?? 0, delta.cash_in ?? 0)
+    const cash_out = addMoney(base.cash_out ?? 0, delta.cash_out ?? 0)
+    const updated: Book = { ...base, cash_in, cash_out, balance: subtractMoney(cash_in, cash_out) }
 
     set(s => ({
       books: s.books.map(b => (b.id === bookId ? updated : b)),

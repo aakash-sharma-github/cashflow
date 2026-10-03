@@ -14,6 +14,7 @@ import supabase from './supabase'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import type { Entry, EntryFormData, EntryFilter, ApiResponse } from '../types'
 import { PAGE_SIZE } from '../constants'
+import { normalizeEntryAmount } from '../utils/money'
 
 // ─── Cache helpers ────────────────────────────────────────────
 // TWO separate caches prevent the "export returns only 30 entries" bug:
@@ -183,13 +184,15 @@ export const entriesService = {
   ): Promise<ApiResponse<Entry>> {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { data: null, error: 'Not authenticated' }
+    const amount = normalizeEntryAmount(formData.amount)
+    if (!amount) return { data: null, error: 'Amount must be positive and no greater than 9,999,999,999.99, with up to 2 decimal places.' }
 
     const { data, error } = await supabase
       .from('entries')
       .insert({
         book_id: bookId,
         user_id: user.id,
-        amount: parseFloat(formData.amount),
+        amount,
         type: formData.type,
         note: formData.note?.trim() || null,
         entry_date: formData.entry_date.toISOString(),
@@ -218,7 +221,7 @@ export const entriesService = {
    */
   async batchCreateEntries(
     bookId: string,
-    rows: { amount: number; type: string; note: string | null; entry_date: string }[]
+    rows: { amount: number | string; type: string; note: string | null; entry_date: string }[]
   ): Promise<{ inserted: number; failed: number }> {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { inserted: 0, failed: rows.length }
@@ -228,14 +231,23 @@ export const entriesService = {
     let failed = 0
 
     for (let i = 0; i < rows.length; i += CHUNK) {
-      const chunk = rows.slice(i, i + CHUNK).map(r => ({
+      const selected = rows.slice(i, i + CHUNK)
+      const chunk = selected.flatMap(r => {
+        const amount = normalizeEntryAmount(r.amount)
+        if (!amount || !['cash_in', 'cash_out'].includes(r.type)) {
+          failed++
+          return []
+        }
+        return [{
         book_id: bookId,
         user_id: user.id,
-        amount: r.amount,
+        amount,
         type: r.type,
         note: r.note,
         entry_date: r.entry_date,
-      }))
+        }]
+      })
+      if (!chunk.length) continue
 
       const { data, error } = await supabase
         .from('entries')
@@ -263,7 +275,11 @@ export const entriesService = {
     formData: Partial<EntryFormData>
   ): Promise<ApiResponse<Entry>> {
     const updates: Record<string, unknown> = {}
-    if (formData.amount !== undefined) updates.amount = parseFloat(formData.amount)
+    if (formData.amount !== undefined) {
+      const amount = normalizeEntryAmount(formData.amount)
+      if (!amount) return { data: null, error: 'Amount must be positive and no greater than 9,999,999,999.99, with up to 2 decimal places.' }
+      updates.amount = amount
+    }
     if (formData.type !== undefined) updates.type = formData.type
     if (formData.note !== undefined) updates.note = formData.note?.trim() || null
     if (formData.entry_date !== undefined) updates.entry_date = formData.entry_date.toISOString()
@@ -313,12 +329,12 @@ export const entriesService = {
    * row limits and entry pagination.
    */
   async getBookSummary(bookId: string): Promise<ApiResponse<{
-    balance: number
-    cash_in: number
-    cash_out: number
+    balance: string
+    cash_in: string
+    cash_out: string
     entry_count: number
   }>> {
-    const { data, error } = await supabase.rpc('get_book_financial_summaries', {
+    const { data, error } = await supabase.rpc('get_book_financial_summaries_exact', {
       p_book_id: bookId,
     })
 
@@ -328,9 +344,9 @@ export const entriesService = {
 
     return {
       data: {
-        cash_in: Number(summary.cash_in),
-        cash_out: Number(summary.cash_out),
-        balance: Number(summary.balance),
+        cash_in: String(summary.cash_in),
+        cash_out: String(summary.cash_out),
+        balance: String(summary.balance),
         entry_count: Number(summary.entry_count),
       },
       error: null,

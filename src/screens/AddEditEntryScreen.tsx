@@ -79,7 +79,13 @@ export default function AddEditEntryScreen({ route, navigation }: any) {
   const symbol = currencySymbols[currency] || currency;
 
   const doSave = async (addNew: boolean) => {
-    if (!isValidAmount(amount)) return;
+    if (!isValidAmount(amount)) {
+      themedAlert(
+        "Invalid Amount",
+        "Enter a positive amount up to 9,999,999,999.99, with a dot and no more than 2 decimal places.",
+      );
+      return;
+    }
 
     if (addNew) setLoadingNew(true);
     else setLoading(true);
@@ -273,8 +279,9 @@ export default function AddEditEntryScreen({ route, navigation }: any) {
               style={[s.amountInput, { color: amountColor }]}
               value={amount}
               onChangeText={(v) => {
-                if (/^\d*\.?\d{0,2}$/.test(v)) setAmount(v);
+                if (v.length <= 13 && /^\d*\.?\d{0,2}$/.test(v)) setAmount(v);
               }}
+              maxLength={13}
               placeholder="0"
               placeholderTextColor={amountColor + "50"}
               keyboardType="decimal-pad"

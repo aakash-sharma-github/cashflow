@@ -32,7 +32,7 @@ import {
   themedAlert,
   themedActionSheet,
 } from "../components/common/ThemedAlert";
-import { formatAmount } from "../utils";
+import { compareMoney, formatAmount } from "../utils";
 import { format, isToday, isYesterday } from "date-fns";
 import { entriesService } from "../services/entriesService";
 import supabase from "../services/supabase";
@@ -556,12 +556,13 @@ export default function BookDetailScreen({ route, navigation }: any) {
             Net Balance
           </Text>
           <Text
+            accessibilityLabel={`Net balance: ${compareMoney(bal) < 0 ? 'negative ' : ''}${formatAmount(bal, currentBook?.currency)}`}
             style={[
               s.balancePanelVal,
-              { color: bal >= 0 ? COLORS.cashIn : COLORS.cashOut },
+              { color: compareMoney(bal) >= 0 ? COLORS.cashIn : COLORS.cashOut },
             ]}
           >
-            {formatAmount(Math.abs(bal), currentBook?.currency)}
+            {formatAmount(bal, currentBook?.currency)}
           </Text>
         </View>
         <View style={[s.balanceDivider, { backgroundColor: theme.border }]} />

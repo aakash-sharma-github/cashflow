@@ -13,6 +13,7 @@ import supabase from "./supabase";
 import { localBooksDb, localEntriesDb, localMetaDb } from "./localDb";
 import type { PendingOperation } from "../store/offlineStore";
 import { logger } from "../utils/logger";
+import { normalizeEntryAmount } from "../utils/money";
 
 export interface SyncResult {
   succeeded: string[];
@@ -133,6 +134,10 @@ export const syncService = {
           // ── CREATE_ENTRY ─────────────────────────────────────────
           case "CREATE_ENTRY": {
             const { tempId, ...entryData } = payload;
+            const amount = normalizeEntryAmount(entryData.amount);
+            if (!amount || !["cash_in", "cash_out"].includes(entryData.type)) {
+              throw new Error("Queued entry has an invalid amount or type");
+            }
 
             // If book_id is still a temp ID after sorting + patching above,
             // it means CREATE_BOOK failed earlier in this same sync run.
@@ -150,7 +155,7 @@ export const syncService = {
 
             const { data, error } = await supabase
               .from("entries")
-              .insert({ ...entryData, user_id: userId })
+              .insert({ ...entryData, amount, user_id: userId })
               .select("*, profile:profiles(id, email, full_name)")
               .single();
 
@@ -210,6 +215,11 @@ export const syncService = {
           // ── UPDATE_ENTRY ─────────────────────────────────────────
           case "UPDATE_ENTRY": {
             const { entryId, book_id: _bookId, ...updates } = payload;
+            if (updates.amount !== undefined) {
+              const amount = normalizeEntryAmount(updates.amount);
+              if (!amount) throw new Error("Queued update has an invalid amount");
+              updates.amount = amount;
+            }
 
             // Still a temp ID = CREATE_ENTRY failed before this in same sync
             if (typeof entryId === "string" && entryId.startsWith("local_")) {
@@ -280,36 +290,37 @@ export const syncService = {
   // Fetches all remote books + entries and overwrites local cache.
   // Called after a successful sync or on first login while online.
   async fullRefresh(userId: string): Promise<void> {
-    const { data: books } = await supabase
+    const [{ data: books }, { data: summaries }] = await Promise.all([
+      supabase
       .from("books")
-      .select(`*, book_members!inner(role, user_id), entries(amount, type)`)
+      .select(`*, book_members!inner(role, user_id)`)
       .eq("book_members.user_id", userId)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false }),
+      supabase.rpc("get_book_financial_summaries_exact", { p_book_id: null }),
+    ]);
 
-    if (!books) return;
+    if (!books || !summaries) return;
+    const summaryByBook = new Map((summaries as any[]).map(summary => [summary.book_id, summary]));
 
     const enriched = books.map((book: any) => {
       const mine = book.book_members?.find((m: any) => m.user_id === userId);
-      const cashIn = (book.entries || [])
-        .filter((e: any) => e.type === "cash_in")
-        .reduce((s: number, e: any) => s + Number(e.amount), 0);
-      const cashOut = (book.entries || [])
-        .filter((e: any) => e.type === "cash_out")
-        .reduce((s: number, e: any) => s + Number(e.amount), 0);
-      const { entries, book_members, ...rest } = book;
+      const summary: any = summaryByBook.get(book.id);
+      if (!summary) return null;
+      const { book_members, ...rest } = book;
       return {
         ...rest,
         role: mine?.role,
-        cash_in: cashIn,
-        cash_out: cashOut,
-        balance: cashIn - cashOut,
-        member_count: book.book_members?.length || 1,
+        cash_in: String(summary.cash_in),
+        cash_out: String(summary.cash_out),
+        balance: String(summary.balance),
+        member_count: Number(summary.member_count),
       };
     });
 
-    await localBooksDb.save(userId, enriched);
+    const validBooks = enriched.filter((book): book is NonNullable<typeof book> => Boolean(book));
+    await localBooksDb.save(userId, validBooks);
 
-    for (const book of enriched) {
+    for (const book of validBooks) {
       const { data: entries } = await supabase
         .from("entries")
         .select("*, profile:profiles(id, email, full_name)")

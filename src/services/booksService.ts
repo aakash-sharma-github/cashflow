@@ -17,7 +17,7 @@ export const booksService = {
         .select('*, book_members!inner(role, user_id)')
         .eq('book_members.user_id', user.id)
         .order('created_at', { ascending: false }),
-      supabase.rpc('get_book_financial_summaries', { p_book_id: null }),
+      supabase.rpc('get_book_financial_summaries_exact', { p_book_id: null }),
     ])
 
     if (error || summaryError) return { data: null, error: (error || summaryError)!.message }
@@ -34,9 +34,9 @@ export const booksService = {
       return {
         ...bookData,
         role: myMembership?.role,
-        cash_in: Number(summary?.cash_in ?? 0),
-        cash_out: Number(summary?.cash_out ?? 0),
-        balance: Number(summary?.balance ?? 0),
+        cash_in: String(summary?.cash_in ?? '0'),
+        cash_out: String(summary?.cash_out ?? '0'),
+        balance: String(summary?.balance ?? '0'),
         member_count: Number(summary?.member_count ?? 1),
       }
     })
@@ -58,7 +58,7 @@ export const booksService = {
         .eq('id', id)
         .eq('book_members.user_id', user.id)
         .single(),
-      supabase.rpc('get_book_financial_summaries', { p_book_id: id }),
+      supabase.rpc('get_book_financial_summaries_exact', { p_book_id: id }),
     ])
 
     if (error || summaryError) return { data: null, error: (error || summaryError)!.message }
@@ -72,9 +72,9 @@ export const booksService = {
       data: {
         ...bookData,
         role: myMembership?.role,
-        cash_in: Number(summary.cash_in),
-        cash_out: Number(summary.cash_out),
-        balance: Number(summary.balance),
+        cash_in: String(summary.cash_in),
+        cash_out: String(summary.cash_out),
+        balance: String(summary.balance),
         member_count: Number(summary.member_count),
       },
       error: null,

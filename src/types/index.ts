@@ -21,9 +21,9 @@ export interface Book {
   updated_at: string
   // Computed fields (joined)
   member_count?: number
-  balance?: number
-  cash_in?: number
-  cash_out?: number
+  balance?: number | string
+  cash_in?: number | string
+  cash_out?: number | string
   role?: MemberRole
 }
 
@@ -45,7 +45,7 @@ export interface Entry {
   id: string
   book_id: string
   user_id: string
-  amount: number
+  amount: number | string
   type: EntryType
   note: string | null
   entry_date: string

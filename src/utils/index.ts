@@ -1,24 +1,13 @@
 // src/utils/index.ts
 import { format, formatDistanceToNow, isToday, isYesterday } from 'date-fns'
+import { formatMoney, isValidAmount } from './money'
+export { addMoney, compareMoney, formatMoney, isValidAmount, normalizeEntryAmount, subtractMoney, sumMoney } from './money'
 
 /**
  * Format currency amount
  */
-export function formatAmount(amount: number, currency = 'USD'): string {
-  const currencySymbols: Record<string, string> = {
-    USD: '$', EUR: '€', GBP: '£', INR: '₹',
-    AED: 'د.إ', SAR: '﷼', NPR: 'रु', BDT: '৳',
-  }
-  const symbol = currencySymbols[currency] || currency
-
-  // Guard: NaN, null, undefined, Infinity all become 0
-  const safe = (typeof amount !== 'number' || !isFinite(amount)) ? 0 : amount
-
-  const abs = Math.abs(safe)
-  const formatted = Number.isInteger(abs)
-    ? abs.toLocaleString('en-US')
-    : abs.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
-  return `${symbol}${formatted}`
+export function formatAmount(amount: number | string, currency = 'USD'): string {
+  return formatMoney(amount, currency)
 }
 
 /**
@@ -64,15 +53,6 @@ export function getInitials(nameOrEmail: string): string {
  */
 export function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
-}
-
-/**
- * Validate amount input
- */
-export function isValidAmount(value: string): boolean {
-  if (!value) return false
-  const num = parseFloat(value)
-  return !isNaN(num) && num > 0 && num < 1_000_000_000
 }
 
 /**

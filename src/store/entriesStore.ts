@@ -8,6 +8,7 @@ import { useAuthStore } from "./authStore";
 import { useBooksStore } from "./booksStore";
 import { PAGE_SIZE } from "../constants";
 import { logger } from "../utils/logger";
+import { normalizeEntryAmount, subtractMoney, sumMoney } from "../utils/money";
 
 const genTempId = () =>
   `local_${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -21,9 +22,9 @@ interface EntriesState {
   currentPage: number;
   hasMore: boolean;
   summary: {
-    balance: number;
-    cash_in: number;
-    cash_out: number;
+    balance: string;
+    cash_in: string;
+    cash_out: string;
     entry_count: number;
   } | null;
   loadedBookId: string | null;
@@ -51,23 +52,35 @@ interface EntriesState {
 }
 
 function computeSummary(entries: Entry[]) {
-  // Guard against NaN — amount may be string or undefined in temp/offline entries
-  const toNum = (v: any) => {
-    const n = Number(v)
-    return isNaN(n) ? 0 : n
-  }
-  const cash_in = entries
-    .filter((e) => e.type === "cash_in")
-    .reduce((s, e) => s + toNum(e.amount), 0);
-  const cash_out = entries
-    .filter((e) => e.type === "cash_out")
-    .reduce((s, e) => s + toNum(e.amount), 0);
+  const cash_in = sumMoney(entries.filter((e) => e.type === "cash_in").map((e) => e.amount));
+  const cash_out = sumMoney(entries.filter((e) => e.type === "cash_out").map((e) => e.amount));
   return {
     cash_in,
     cash_out,
-    balance: cash_in - cash_out,
+    balance: subtractMoney(cash_in, cash_out),
     entry_count: entries.length,
   };
+}
+
+function summaryAfterChange(
+  summary: EntriesState['summary'],
+  entries: Entry[],
+  oldEntry?: Entry,
+  newEntry?: Entry,
+) {
+  const base = summary ?? computeSummary(entries)
+  let cash_in = base.cash_in
+  let cash_out = base.cash_out
+  if (oldEntry?.type === 'cash_in') cash_in = subtractMoney(cash_in, oldEntry.amount)
+  if (oldEntry?.type === 'cash_out') cash_out = subtractMoney(cash_out, oldEntry.amount)
+  if (newEntry?.type === 'cash_in') cash_in = sumMoney([cash_in, newEntry.amount])
+  if (newEntry?.type === 'cash_out') cash_out = sumMoney([cash_out, newEntry.amount])
+  return {
+    cash_in,
+    cash_out,
+    balance: subtractMoney(cash_in, cash_out),
+    entry_count: base.entry_count + (newEntry ? 1 : 0) - (oldEntry ? 1 : 0),
+  }
 }
 
 export const useEntriesStore = create<EntriesState>((set, get) => ({
@@ -198,16 +211,19 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
   },
 
   createEntry: async (bookId, formData) => {
+    const amount = normalizeEntryAmount(formData.amount);
+    if (!amount) return { error: "Enter an amount greater than 0 and no greater than 9,999,999,999.99, using a dot and up to 2 decimal places." };
     const userId = useAuthStore.getState().user?.id;
     if (!userId) return { error: "Not authenticated" };
     const { isOnline, enqueue } = useOfflineStore.getState();
     const id = genTempId();
     const now = new Date().toISOString();
+    const previousSummary = get().summary;
     const optimistic: Entry = {
       id,
       book_id: bookId,
       user_id: userId,
-      amount: parseFloat(formData.amount),
+      amount,
       type: formData.type,
       note: formData.note || null,
       entry_date: formData.entry_date.toISOString(),
@@ -216,12 +232,12 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
     };
     const delta =
       formData.type === "cash_in"
-        ? { cash_in: parseFloat(formData.amount) }
-        : { cash_out: parseFloat(formData.amount) };
+        ? { cash_in: amount }
+        : { cash_out: amount };
 
     set((state) => {
       const next = [optimistic, ...state.entries]
-      return { entries: next, summary: computeSummary(next) }
+      return { entries: next, summary: summaryAfterChange(state.summary, state.entries, undefined, optimistic) }
     })
     await localEntriesDb.upsert(userId, bookId, optimistic);
     useBooksStore.getState().updateBookBalance(bookId, delta);
@@ -233,7 +249,7 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
         payload: {
           tempId: id,
           book_id: bookId,
-          amount: parseFloat(formData.amount),
+          amount,
           type: formData.type,
           note: formData.note || null,
           entry_date: formData.entry_date.toISOString(),
@@ -246,13 +262,13 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
     if (error) {
       set((state) => {
         const next = state.entries.filter((e) => e.id !== id)
-        return { entries: next, summary: computeSummary(next) }
+        return { entries: next, summary: previousSummary ?? computeSummary(next) }
       });
       await localEntriesDb.remove(userId, bookId, id);
       const r =
         formData.type === "cash_in"
-          ? { cash_in: -parseFloat(formData.amount) }
-          : { cash_out: -parseFloat(formData.amount) };
+          ? { cash_in: subtractMoney(0, amount) }
+          : { cash_out: subtractMoney(0, amount) };
       useBooksStore.getState().updateBookBalance(bookId, r);
       return { error };
     }
@@ -271,10 +287,12 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
     const { isOnline, enqueue } = useOfflineStore.getState();
     const existing = get().entries.find((e) => e.id === id);
     if (!existing) return { error: "Entry not found" };
+    const normalizedAmount = formData.amount === undefined ? undefined : normalizeEntryAmount(formData.amount);
+    if (formData.amount !== undefined && !normalizedAmount) return { error: "Enter an amount greater than 0 and no greater than 9,999,999,999.99, using a dot and up to 2 decimal places." };
     const updated = {
       ...existing,
       ...(formData.amount !== undefined && {
-        amount: parseFloat(formData.amount),
+        amount: normalizedAmount!,
       }),
       ...(formData.type !== undefined && { type: formData.type }),
       ...(formData.note !== undefined && { note: formData.note || null }),
@@ -282,9 +300,10 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
         entry_date: formData.entry_date.toISOString(),
       }),
     };
+    const previousSummary = get().summary;
     set((state) => ({
       entries: state.entries.map((e) => (e.id === id ? updated : e)),
-      summary: computeSummary(state.entries.map((e) => (e.id === id ? updated : e))),
+      summary: summaryAfterChange(state.summary, state.entries, existing, updated as Entry),
     }));
     await localEntriesDb.upsert(userId, bookId, updated as Entry);
     if (!isOnline) {
@@ -303,7 +322,7 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
     if (error) {
       set((state) => {
         const next = state.entries.map((e) => (e.id === id ? existing : e));
-        return { entries: next, summary: computeSummary(next) };
+        return { entries: next, summary: previousSummary ?? computeSummary(next) };
       });
       await localEntriesDb.upsert(userId, bookId, existing);
       return { error };
@@ -323,15 +342,16 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
     const { isOnline, enqueue } = useOfflineStore.getState();
     const existing = get().entries.find((e) => e.id === id);
     if (!existing) return { error: "Entry not found" };
+    const previousSummary = get().summary;
     set((state) => {
       const next = state.entries.filter((e) => e.id !== id);
-      return { entries: next, summary: computeSummary(next) };
+      return { entries: next, summary: summaryAfterChange(state.summary, state.entries, existing) };
     });
     await localEntriesDb.remove(userId, bookId, id);
     const r =
       existing.type === "cash_in"
-        ? { cash_in: -existing.amount }
-        : { cash_out: -existing.amount };
+        ? { cash_in: subtractMoney(0, existing.amount) }
+        : { cash_out: subtractMoney(0, existing.amount) };
     useBooksStore.getState().updateBookBalance(bookId, r);
     if (!isOnline) {
       await enqueue({
@@ -345,7 +365,7 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
     if (error) {
       set((state) => {
         const next = [existing, ...state.entries];
-        return { entries: next, summary: computeSummary(next) };
+        return { entries: next, summary: previousSummary ?? computeSummary(next) };
       });
       await localEntriesDb.upsert(userId, bookId, existing);
       const u =
