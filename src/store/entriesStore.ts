@@ -135,7 +135,8 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
     // ── Step 3: Online — fetch fresh data from server ────────────
     try {
       const { data, error } = await entriesService.getEntries(bookId, get().filter, 0);
-      const { data: summary } = await entriesService.getBookSummary(bookId);
+      const { data: summary, error: summaryError } = await entriesService.getBookSummary(bookId);
+      if (summaryError) logger.warn(`[Entries] authoritative summary unavailable for ${bookId}:`, summaryError);
 
       if (error || !data) {
         // Network failed (expired JWT, timeout, etc.) — keep cache visible
@@ -165,7 +166,7 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
         error: null,
         currentPage: 0,
         hasMore: data.length === PAGE_SIZE,
-        summary: summary ?? computeSummary(merged),
+        ...(summary ? { summary } : {}),
       });
     } catch (e) {
       // Any uncaught error — stay with whatever cache was loaded in Step 1

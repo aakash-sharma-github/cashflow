@@ -309,8 +309,8 @@ export const entriesService = {
   },
 
   /**
-   * Book summary — lightweight query, no entry body, no joins.
-   * Used for the balance card in BookDetailScreen.
+   * Authoritative aggregate computed in PostgreSQL, independent of PostgREST
+   * row limits and entry pagination.
    */
   async getBookSummary(bookId: string): Promise<ApiResponse<{
     balance: number
@@ -318,18 +318,21 @@ export const entriesService = {
     cash_out: number
     entry_count: number
   }>> {
-    const { data, error } = await supabase
-      .from('entries')
-      .select('amount, type')
-      .eq('book_id', bookId)
+    const { data, error } = await supabase.rpc('get_book_financial_summaries', {
+      p_book_id: bookId,
+    })
 
     if (error) return { data: null, error: error.message }
-
-    const cash_in = (data ?? []).filter(e => e.type === 'cash_in').reduce((s, e) => s + Number(e.amount), 0)
-    const cash_out = (data ?? []).filter(e => e.type === 'cash_out').reduce((s, e) => s + Number(e.amount), 0)
+    const summary = data?.find((item: any) => item.book_id === bookId)
+    if (!summary) return { data: null, error: 'Book not found or unavailable' }
 
     return {
-      data: { cash_in, cash_out, balance: cash_in - cash_out, entry_count: (data ?? []).length },
+      data: {
+        cash_in: Number(summary.cash_in),
+        cash_out: Number(summary.cash_out),
+        balance: Number(summary.balance),
+        entry_count: Number(summary.entry_count),
+      },
       error: null,
     }
   },

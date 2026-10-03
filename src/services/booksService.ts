@@ -11,36 +11,33 @@ export const booksService = {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { data: null, error: 'Not authenticated' }
 
-    const { data, error } = await supabase
-      .from('books')
-      .select(`
-        *,
-        book_members!inner(role, user_id),
-        entries(amount, type)
-      `)
-      .eq('book_members.user_id', user.id)
-      .order('created_at', { ascending: false })
+    const [{ data, error }, { data: summaries, error: summaryError }] = await Promise.all([
+      supabase
+        .from('books')
+        .select('*, book_members!inner(role, user_id)')
+        .eq('book_members.user_id', user.id)
+        .order('created_at', { ascending: false }),
+      supabase.rpc('get_book_financial_summaries', { p_book_id: null }),
+    ])
 
-    if (error) return { data: null, error: error.message }
+    if (error || summaryError) return { data: null, error: (error || summaryError)!.message }
 
-    // Compute balance and role per book
+    const summaryByBook = new Map((summaries ?? []).map((summary: any) => [summary.book_id, summary]))
+    if ((data ?? []).some((book: any) => !summaryByBook.has(book.id))) {
+      return { data: null, error: 'Financial totals are unavailable for one or more books' }
+    }
     const enriched: Book[] = (data || []).map((book: any) => {
       const myMembership = book.book_members?.find((m: any) => m.user_id === user.id)
-      const cashIn = book.entries
-        ?.filter((e: any) => e.type === 'cash_in')
-        .reduce((s: number, e: any) => s + Number(e.amount), 0) || 0
-      const cashOut = book.entries
-        ?.filter((e: any) => e.type === 'cash_out')
-        .reduce((s: number, e: any) => s + Number(e.amount), 0) || 0
+      const summary: any = summaryByBook.get(book.id)
 
-      const { entries, book_members, ...bookData } = book
+      const { book_members, ...bookData } = book
       return {
         ...bookData,
         role: myMembership?.role,
-        cash_in: cashIn,
-        cash_out: cashOut,
-        balance: cashIn - cashOut,
-        member_count: book.book_members?.length || 1,
+        cash_in: Number(summary?.cash_in ?? 0),
+        cash_out: Number(summary?.cash_out ?? 0),
+        balance: Number(summary?.balance ?? 0),
+        member_count: Number(summary?.member_count ?? 1),
       }
     })
 
@@ -54,32 +51,31 @@ export const booksService = {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { data: null, error: 'Not authenticated' }
 
-    const { data, error } = await supabase
-      .from('books')
-      .select(`
-        *,
-        book_members!inner(role, user_id),
-        entries(amount, type)
-      `)
-      .eq('id', id)
-      .eq('book_members.user_id', user.id)
-      .single()
+    const [{ data, error }, { data: summaries, error: summaryError }] = await Promise.all([
+      supabase
+        .from('books')
+        .select('*, book_members!inner(role, user_id)')
+        .eq('id', id)
+        .eq('book_members.user_id', user.id)
+        .single(),
+      supabase.rpc('get_book_financial_summaries', { p_book_id: id }),
+    ])
 
-    if (error) return { data: null, error: error.message }
+    if (error || summaryError) return { data: null, error: (error || summaryError)!.message }
+    const summary: any = summaries?.find((item: any) => item.book_id === id)
+    if (!summary) return { data: null, error: 'Book not found or unavailable' }
 
     const myMembership = data.book_members?.find((m: any) => m.user_id === user.id)
-    const cashIn = data.entries?.filter((e: any) => e.type === 'cash_in').reduce((s: number, e: any) => s + Number(e.amount), 0) || 0
-    const cashOut = data.entries?.filter((e: any) => e.type === 'cash_out').reduce((s: number, e: any) => s + Number(e.amount), 0) || 0
 
-    const { entries, book_members, ...bookData } = data
+    const { book_members, ...bookData } = data
     return {
       data: {
         ...bookData,
         role: myMembership?.role,
-        cash_in: cashIn,
-        cash_out: cashOut,
-        balance: cashIn - cashOut,
-        member_count: data.book_members?.length || 1,
+        cash_in: Number(summary.cash_in),
+        cash_out: Number(summary.cash_out),
+        balance: Number(summary.balance),
+        member_count: Number(summary.member_count),
       },
       error: null,
     }
