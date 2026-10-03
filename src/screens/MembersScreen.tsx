@@ -121,7 +121,6 @@ export default function MembersScreen({ route }: any) {
     const { error } = await invitationsService.sendInvitation(
       bookId,
       email,
-      currentBook?.name || "Book",
     );
     setSending(false);
     if (error) {

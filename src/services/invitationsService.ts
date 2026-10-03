@@ -9,21 +9,27 @@ export const invitationsService = {
    */
   async sendInvitation(
     bookId: string,
-    inviteeEmail: string,
-    bookName: string
+    inviteeEmail: string
   ): Promise<ApiResponse<Invitation>> {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { data: null, error: 'Not authenticated' }
+    const normalizedEmail = inviteeEmail.trim().toLowerCase()
 
     // Check if user already a member
-    const { data: existingMember } = await supabase
-      .from('book_members')
+    const { data: inviteeProfile } = await supabase
+      .from('profiles')
       .select('id')
-      .eq('book_id', bookId)
-      .eq('user_id', (
-        await supabase.from('profiles').select('id').eq('email', inviteeEmail).single()
-      ).data?.id || '')
-      .single()
+      .eq('email', normalizedEmail)
+      .maybeSingle()
+
+    const { data: existingMember } = inviteeProfile
+      ? await supabase
+          .from('book_members')
+          .select('id')
+          .eq('book_id', bookId)
+          .eq('user_id', inviteeProfile.id)
+          .maybeSingle()
+      : { data: null }
 
     if (existingMember) {
       return { data: null, error: 'This user is already a member of this book' }
@@ -35,7 +41,7 @@ export const invitationsService = {
       .insert({
         book_id: bookId,
         inviter_id: user.id,
-        invitee_email: inviteeEmail.toLowerCase().trim(),
+        invitee_email: normalizedEmail,
       })
       .select()
       .single()
@@ -47,20 +53,11 @@ export const invitationsService = {
       return { data: null, error: error.message }
     }
 
-    // Fire and forget: send email via edge function
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('full_name, email')
-      .eq('id', user.id)
-      .single()
-
-    supabase.functions.invoke('send-invite', {
-      body: {
-        invitationId: invitation.id,
-        bookName,
-        inviterName: profile?.full_name || profile?.email || 'Someone',
-        inviteeEmail,
-      },
+    // The edge function derives recipient and display names from the invitation row.
+    supabase.functions.invoke('cashflow-invite', {
+      body: { invitationId: invitation.id },
+    }).then(({ error: sendError }) => {
+      if (sendError) logger.error('[Invitations] Email notification failed:', sendError.message)
     }).catch(logger.error)
 
     return { data: invitation, error: null }
