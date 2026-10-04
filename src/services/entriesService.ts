@@ -5,9 +5,8 @@
 //   • Paginated display (getEntries) — page 0 is cached in AsyncStorage.
 //     Subsequent pages are fetched on demand and appended to cache.
 //     On offline load, the cached pages serve as the offline dataset.
-//   • Export (getAllEntries) — reads from the full local cache first;
-//     only hits the network to top up if cache is stale (>5 min) or empty.
-//     This avoids fetching 9999 rows on every export.
+//   • Export (getAllEntries) — always fetches every server page. Export must
+//     not treat a local cache or the visible page as complete financial data.
 //   • getBookSummary — uses a lightweight `amount,type` only query (no joins).
 
 import supabase from './supabase'
@@ -15,28 +14,17 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import type { Entry, EntryFormData, EntryFilter, ApiResponse } from '../types'
 import { PAGE_SIZE } from '../constants'
 import { normalizeEntryAmount } from '../utils/money'
+import { useOfflineStore } from '../store/offlineStore'
 
 // ─── Cache helpers ────────────────────────────────────────────
-// TWO separate caches prevent the "export returns only 30 entries" bug:
-//
-//   displayCacheKey → written ONLY by getEntries(page=0)
-//                     holds the latest 30 entries for offline display
-//
-//   fullCacheKey    → written ONLY by getAllEntries
-//                     holds ALL entries; used exclusively for export
-//
-// If both used the same key, getAllEntries would find a fresh 30-entry
-// display cache and return only 30 entries — exactly the bug being fixed.
+// The display cache is intentionally separate from exports. It contains only
+// the first display page and must never be used as a complete export dataset.
 
 const CACHE_V = 'v2'
 
 // Display cache — page-0 only, 30 entries max
 const displayCacheKey = (u: string, b: string) => `cashflow:entries_display:${CACHE_V}:${u}:${b}`
 
-// Full export cache — all entries
-const fullCacheKey = (u: string, b: string) => `cashflow:entries_full:${CACHE_V}:${u}:${b}`
-const fullCacheMetaKey = (u: string, b: string) => `cashflow:entries_full_meta:${CACHE_V}:${u}:${b}`
-const FULL_CACHE_TTL_MS = 5 * 60 * 1000  // 5 minutes
 
 async function readDisplayCache(userId: string, bookId: string): Promise<Entry[]> {
   try {
@@ -47,32 +35,6 @@ async function readDisplayCache(userId: string, bookId: string): Promise<Entry[]
 
 async function writeDisplayCache(userId: string, bookId: string, entries: Entry[]): Promise<void> {
   try { await AsyncStorage.setItem(displayCacheKey(userId, bookId), JSON.stringify(entries)) } catch { }
-}
-
-async function readFullCache(userId: string, bookId: string): Promise<Entry[]> {
-  try {
-    const raw = await AsyncStorage.getItem(fullCacheKey(userId, bookId))
-    return raw ? JSON.parse(raw) : []
-  } catch { return [] }
-}
-
-async function writeFullCache(userId: string, bookId: string, entries: Entry[]): Promise<void> {
-  try {
-    await AsyncStorage.setItem(fullCacheKey(userId, bookId), JSON.stringify(entries))
-    await AsyncStorage.setItem(fullCacheMetaKey(userId, bookId), JSON.stringify({ updatedAt: Date.now() }))
-  } catch { }
-}
-
-async function isFullCacheStale(userId: string, bookId: string): Promise<boolean> {
-  try {
-    const raw = await AsyncStorage.getItem(fullCacheMetaKey(userId, bookId))
-    if (!raw) return true
-    return (Date.now() - (JSON.parse(raw).updatedAt ?? 0)) > FULL_CACHE_TTL_MS
-  } catch { return true }
-}
-
-async function invalidateCache(userId: string, bookId: string): Promise<void> {
-  try { await AsyncStorage.removeItem(fullCacheMetaKey(userId, bookId)) } catch { }
 }
 
 // ─── Service ──────────────────────────────────────────────────
@@ -119,73 +81,72 @@ export const entriesService = {
   },
 
   /**
-   * All entries for a book — used by Export and by offline display.
-   * Reads from cache first; only fetches from network when cache is stale.
-   * Does NOT use .range(0, 9999) — instead fetches in background pages.
+   * All server entries for a book, for complete exports.
+   * Never substitutes cached or currently visible rows when a request fails.
    */
   async getAllEntries(
     bookId: string,
     filter: EntryFilter = 'all'
   ): Promise<ApiResponse<Entry[]>> {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return { data: null, error: 'Not authenticated' }
-    const stale = await isFullCacheStale(user.id, bookId)
-    const cached = await readFullCache(user.id, bookId)
+    try {
+      const { data: { user }, error: authError } = await supabase.auth.getUser()
+      if (authError || !user) return { data: null, error: authError?.message ?? 'Not authenticated' }
 
-    if (!stale && cached.length > 0) {
-      // Cache is fresh — apply filter and return immediately
-      const filtered = filter === 'all' ? cached : cached.filter(e => e.type === filter)
-      return { data: filtered, error: null }
-    }
-
-    // Full cache is stale or empty — fetch all pages from server
-    const allEntries: Entry[] = []
-    let page = 0
-    const BATCH = 500  // larger batches for export efficiency
-
-    while (true) {
-      let q = supabase
-        .from('entries')
-        .select(`*, profile:profiles(id, email, full_name)`)
-        .eq('book_id', bookId)
-        .order('entry_date', { ascending: false })
-        .range(page * BATCH, (page + 1) * BATCH - 1)
-
-      const { data, error } = await q
-      if (error) {
-        // Network failure — return stale cache if available
-        const staleCached = await readFullCache(user.id, bookId)
-        if (staleCached.length > 0) {
-          const filtered = filter === 'all' ? staleCached : staleCached.filter(e => e.type === filter)
-          return { data: filtered, error: null }
-        }
-        return { data: null, error: error.message }
+      const hasPendingBookEntries = useOfflineStore.getState().pendingQueue.some(op => {
+        if (!['CREATE_ENTRY', 'UPDATE_ENTRY', 'DELETE_ENTRY'].includes(op.type)) return false
+        const queuedBookId = op.payload.book_id ?? op.payload.bookId
+        return queuedBookId === bookId && (!op.userId || op.userId === user.id)
+      })
+      if (hasPendingBookEntries) {
+        return { data: null, error: 'Export unavailable: sync pending changes for this book first' }
       }
 
-      allEntries.push(...(data ?? []))
+      const allEntries: Entry[] = []
+      const BATCH = 500
+      let page = 0
+      while (true) {
+        let query = supabase
+          .from('entries')
+          .select(`*, profile:profiles(id, email, full_name)`)
+          .eq('book_id', bookId)
+          .order('entry_date', { ascending: false })
+          .order('id', { ascending: false })
+          .range(page * BATCH, (page + 1) * BATCH - 1)
+        if (filter !== 'all') query = query.eq('type', filter)
 
-      // Stop when we get fewer entries than batch size (last page)
-      if (!data || data.length < BATCH) break
-
-      // Safety cap: max 10 pages × 500 = 5000 entries
-      if (++page >= 10 && data.length === BATCH) {
-        return { data: null, error: 'Export is incomplete: more than 5,000 entries require additional pages' }
+        const { data, error } = await query
+        if (error) return { data: null, error: `Export failed while loading page ${page + 1}: ${error.message}` }
+        if (data === null) return { data: null, error: `Export failed: server returned no data for page ${page + 1}` }
+        const rows = data
+        allEntries.push(...rows)
+        if (rows.length < BATCH) break
+        page += 1
       }
+
+      const { data: summary, error: summaryError } = await entriesService.getBookSummary(bookId, user.id)
+      if (summaryError || !summary) return { data: null, error: `Export failed while verifying completeness: ${summaryError ?? 'book summary unavailable'}` }
+      let expectedCount = summary.entry_count
+      if (filter !== 'all') {
+        const { count, error } = await supabase.from('entries')
+          .select('id', { count: 'exact', head: true })
+          .eq('book_id', bookId)
+          .eq('type', filter)
+        if (error || count === null) return { data: null, error: `Export failed while verifying filtered entry count: ${error?.message ?? 'count unavailable'}` }
+        expectedCount = count
+      }
+      if (expectedCount !== allEntries.length) {
+        return { data: null, error: `Export incomplete: server reports ${expectedCount} matching entries but ${allEntries.length} were retrieved` }
+      }
+
+      return { data: allEntries, error: null }
+    } catch (error: any) {
+      return { data: null, error: error?.message ?? 'Export failed while loading entries' }
     }
-
-    // Preserve any unsync'd local temp entries
-    const tempEntries = cached.filter(e => e.id.startsWith('local_'))
-    const final = [...tempEntries, ...allEntries]
-
-    await writeFullCache(user.id, bookId, final)
-
-    const filtered = filter === 'all' ? final : final.filter(e => e.type === filter)
-    return { data: filtered, error: null }
   },
 
   /**
    * Create a single entry (used by AddEditEntryScreen).
-   * After creation, invalidates the cache so next getAllEntries re-fetches.
+   * After creation, updates the display cache.
    */
   async createEntry(
     bookId: string,
@@ -226,13 +187,11 @@ export const entriesService = {
     }
 
     // Update display cache immediately so offline list stays current
-    // Also invalidate full cache so next export re-fetches fresh data
     if (data) {
       const display = await readDisplayCache(user.id, bookId)
       const updated = [data, ...display.filter(e => e.id !== data.id)]
         .sort((a, b) => new Date(b.entry_date).getTime() - new Date(a.entry_date).getTime())
       await writeDisplayCache(user.id, bookId, updated)
-      await invalidateCache(user.id, bookId)  // force export cache refresh
     }
 
     return { data, error: null }
@@ -240,7 +199,7 @@ export const entriesService = {
 
   /**
    * Batch create entries — used by CSV import.
-   * Inserts in chunks of 100, then invalidates cache.
+   * Inserts in chunks of 100.
    */
   async batchCreateEntries(
     bookId: string,
@@ -284,9 +243,6 @@ export const entriesService = {
       }
     }
 
-    // Invalidate cache so next fetch gets fresh data including imported entries
-    if (inserted > 0) await invalidateCache(user.id, bookId)
-
     return { inserted, failed }
   },
 
@@ -323,7 +279,6 @@ export const entriesService = {
       const display = await readDisplayCache(user.id, data.book_id)
       const idx = display.findIndex(e => e.id === id)
       if (idx >= 0) { display[idx] = data; await writeDisplayCache(user.id, data.book_id, display) }
-      await invalidateCache(user.id, data.book_id)
     }
 
     return { data, error: null }
@@ -345,7 +300,6 @@ export const entriesService = {
     if (error) return { data: null, error: error.message }
     const display = await readDisplayCache(user.id, data.book_id)
     await writeDisplayCache(user.id, data.book_id, display.filter(entry => entry.id !== id))
-    await invalidateCache(user.id, data.book_id)
     return { data: null, error: null }
   },
 
@@ -357,7 +311,6 @@ export const entriesService = {
       .sort((a, b) => new Date(b.entry_date).getTime() - new Date(a.entry_date).getTime())
       .slice(0, PAGE_SIZE)
     await writeDisplayCache(user.id, entry.book_id, next)
-    await invalidateCache(user.id, entry.book_id)
   },
 
   async applyRealtimeDelete(bookId: string, entryId: string, expectedUserId?: string): Promise<void> {
@@ -365,15 +318,15 @@ export const entriesService = {
     if (!user || expectedUserId && user.id !== expectedUserId) return
     const display = await readDisplayCache(user.id, bookId)
     await writeDisplayCache(user.id, bookId, display.filter(entry => entry.id !== entryId))
-    await invalidateCache(user.id, bookId)
   },
 
   /**
-   * Invalidate cache for a book — call after batch deletes.
+   * Invalidate the display cache for a book — call after batch deletes.
    */
   async invalidateBookCache(bookId: string): Promise<void> {
     const { data: { user } } = await supabase.auth.getUser()
-    if (user) await invalidateCache(user.id, bookId)
+    if (!user) return
+    try { await AsyncStorage.removeItem(displayCacheKey(user.id, bookId)) } catch { }
   },
 
   /**

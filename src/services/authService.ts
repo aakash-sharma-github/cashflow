@@ -16,6 +16,12 @@ const PROFILE_CACHE_PREFIX = 'cashflow:cached_profile:'
 const LEGACY_PROFILE_CACHE_KEY = 'cashflow:cached_profile'
 const LAST_USER_ID_KEY = 'cashflow:last_profile_user_id'
 const isTransportError = (message: string) => /network|fetch|timeout|timed out|abort|offline|connection/i.test(message)
+const clientProfile = (profile: Profile): Profile => ({
+  id: profile.id,
+  email: profile.email,
+  full_name: profile.full_name ?? null,
+  avatar_url: profile.avatar_url ?? null,
+})
 
 export const authService = {
   // ── Profile cache ──────────────────────────────────────────
@@ -31,14 +37,15 @@ export const authService = {
         }
       }
       const profile = raw ? JSON.parse(raw) as Profile : null
-      return profile?.id === userId ? profile : null
+      return profile?.id === userId ? clientProfile(profile) : null
     } catch { return null }
   },
 
   async setCachedProfile(profile: Profile | null): Promise<void> {
     try {
       if (profile) {
-        await AsyncStorage.setItem(`${PROFILE_CACHE_PREFIX}${profile.id}`, JSON.stringify(profile))
+        const safeProfile = clientProfile(profile)
+        await AsyncStorage.setItem(`${PROFILE_CACHE_PREFIX}${profile.id}`, JSON.stringify(safeProfile))
         await AsyncStorage.setItem(LAST_USER_ID_KEY, profile.id)
       } else {
         await AsyncStorage.removeItem(LEGACY_PROFILE_CACHE_KEY)
@@ -168,7 +175,7 @@ export const authService = {
 
       const { data, error } = await supabase
         .from('profiles')
-        .select('*')
+        .select('id,email,full_name,avatar_url')
         .eq('id', user.id)
         .single()
 
@@ -212,7 +219,7 @@ export const authService = {
       .from('profiles')
       .update(updates)
       .eq('id', user.id)
-      .select()
+      .select('id,email,full_name,avatar_url')
       .single()
 
     if (error) {

@@ -22,8 +22,7 @@ import { format } from 'date-fns'
 
 export default function ExportImportScreen({ route }: any) {
   const { bookId } = route.params
-  const { currentBook } = useBooksStore()
-  const { entries } = useEntriesStore()
+  const { currentBook, books } = useBooksStore()
   const { mode } = useThemeStore()
   const theme = getTheme(mode)
 
@@ -33,20 +32,22 @@ export default function ExportImportScreen({ route }: any) {
   const [importPreview, setImportPreview] = useState<ImportResult | null>(null)
   const [importing, setImporting] = useState(false)
 
-  // currentBook guard must come AFTER all hooks
-  if (!currentBook) return null
+  // Resolve the route's book instead of trusting a possibly stale currentBook.
+  const book = books.find(item => item.id === bookId) ?? (currentBook?.id === bookId ? currentBook : null)
+  if (!book) return null
 
   // ── Fetch all entries (bypasses pagination) ──────────────────
   const getAllEntries = async () => {
-    // Use getAllEntries (no PAGE_SIZE limit) so export always gets all entries
-    const { data } = await entriesService.getAllEntries(bookId, 'all')
-    return data && data.length > 0 ? data : entries
+    const { data, error } = await entriesService.getAllEntries(bookId, 'all')
+    if (error) throw new Error(error)
+    if (!data) throw new Error('Export failed: the server did not return a complete entry list')
+    return data
   }
 
   const handleExportCSV = async () => {
     setCsvLoading(true)
     try {
-      await exportEntriesAsCSV(await getAllEntries(), currentBook)
+      await exportEntriesAsCSV(await getAllEntries(), book)
     } catch (e: any) { themedAlert('Export Failed', e.message) }
     finally { setCsvLoading(false) }
   }
@@ -54,7 +55,7 @@ export default function ExportImportScreen({ route }: any) {
   const handleExportPDF = async () => {
     setPdfLoading(true)
     try {
-      await exportEntriesAsPDF(await getAllEntries(), currentBook)
+      await exportEntriesAsPDF(await getAllEntries(), book)
     } catch (e: any) { themedAlert('Export Failed', e.message) }
     finally { setPdfLoading(false) }
   }
@@ -81,7 +82,7 @@ export default function ExportImportScreen({ route }: any) {
     if (!importPreview?.rows.length) return
     themedAlert(
       `Import ${importPreview.rows.length} entr${importPreview.rows.length === 1 ? 'y' : 'ies'}?`,
-      `Add to "${currentBook.name}". This cannot be undone.`,
+      `Add to "${book.name}". This cannot be undone.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -227,14 +228,14 @@ export default function ExportImportScreen({ route }: any) {
               <View style={[s.statDivider, { backgroundColor: theme.border }]} />
               <View style={s.statItem}>
                 <Text style={[s.statNum, { color: COLORS.cashIn }]}>
-                  {formatAmount(previewCashIn, currentBook.currency)}
+                  {formatAmount(previewCashIn, book.currency)}
                 </Text>
                 <Text style={[s.statLabel, { color: theme.textTertiary }]}>cash in</Text>
               </View>
               <View style={[s.statDivider, { backgroundColor: theme.border }]} />
               <View style={s.statItem}>
                 <Text style={[s.statNum, { color: COLORS.cashOut }]}>
-                  {formatAmount(previewCashOut, currentBook.currency)}
+                  {formatAmount(previewCashOut, book.currency)}
                 </Text>
                 <Text style={[s.statLabel, { color: theme.textTertiary }]}>cash out</Text>
               </View>
@@ -290,7 +291,7 @@ export default function ExportImportScreen({ route }: any) {
                       s.rowPreviewAmt,
                       { color: r.type === 'cash_in' ? COLORS.cashIn : COLORS.cashOut },
                     ]}>
-                      {formatAmount(r.amount, currentBook.currency)}
+                      {formatAmount(r.amount, book.currency)}
                     </Text>
                   </View>
                 ))}

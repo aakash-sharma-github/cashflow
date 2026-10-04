@@ -27,6 +27,10 @@ ios/
 
 # testing
 __tests__/
+!src/services/__tests__/
+src/services/__tests__/*
+!src/services/__tests__/entriesExport.test.ts
+!src/services/__tests__/exportMath.test.ts
 !src/store/__tests__/
 
 # Development based md files
