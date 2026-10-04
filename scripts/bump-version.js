@@ -17,9 +17,15 @@ const pkgJsonPath = path.join(__dirname, '..', 'package.json')
 
 const appJson = JSON.parse(fs.readFileSync(appJsonPath, 'utf8'))
 const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'))
+const oldVersion = appJson.expo.version
 
 const bumpType = process.argv[2] || 'patch'
-const [major, minor, patch] = appJson.expo.version.split('.').map(Number)
+const versionParts = oldVersion.split('.').map(Number)
+if (versionParts.length !== 3 || versionParts.some(part => !Number.isInteger(part) || part < 0)) {
+    console.error(`Invalid app.json version: ${oldVersion}. Expected MAJOR.MINOR.PATCH.`)
+    process.exit(1)
+}
+const [major, minor, patch] = versionParts
 
 let newVersion
 switch (bumpType) {
@@ -34,10 +40,44 @@ switch (bumpType) {
 appJson.expo.version = newVersion
 pkgJson.version = newVersion
 
+const androidStringsPath = path.join(__dirname, '..', 'android', 'app', 'src', 'main', 'res', 'values', 'strings.xml')
+const iosInfoPlistPath = path.join(__dirname, '..', 'ios', 'CashFlow', 'Info.plist')
+const iosProjectPath = path.join(__dirname, '..', 'ios', 'CashFlow.xcodeproj', 'project.pbxproj')
+
+const androidStrings = fs.readFileSync(androidStringsPath, 'utf8')
+const runtimeVersionPattern = /(<string name="expo_runtime_version">)[^<]+(<\/string>)/
+const iosVersionPattern = /(<key>CFBundleShortVersionString<\/key>\s*<string>)[^<]+(<\/string>)/
+const iosMarketingPattern = /MARKETING_VERSION = [^;]+;/g
+const hasIosNativeProject = fs.existsSync(iosInfoPlistPath) && fs.existsSync(iosProjectPath)
+
+if (!runtimeVersionPattern.test(androidStrings)) {
+    console.error('Could not find the Android runtime version field; no files were changed.')
+    process.exit(1)
+}
+
+const nextAndroidStrings = androidStrings.replace(runtimeVersionPattern, `$1${newVersion}$2`)
+let nextIosInfoPlist
+let nextIosProject
+if (hasIosNativeProject) {
+    const iosInfoPlist = fs.readFileSync(iosInfoPlistPath, 'utf8')
+    const iosProject = fs.readFileSync(iosProjectPath, 'utf8')
+    if (!iosVersionPattern.test(iosInfoPlist) || (iosProject.match(iosMarketingPattern) || []).length === 0) {
+        console.error('Could not find the iOS version fields; no files were changed.')
+        process.exit(1)
+    }
+    nextIosInfoPlist = iosInfoPlist.replace(iosVersionPattern, `$1${newVersion}$2`)
+    nextIosProject = iosProject.replace(iosMarketingPattern, `MARKETING_VERSION = ${newVersion};`)
+}
+
 fs.writeFileSync(appJsonPath, JSON.stringify(appJson, null, 2))
 fs.writeFileSync(pkgJsonPath, JSON.stringify(pkgJson, null, 2))
+fs.writeFileSync(androidStringsPath, nextAndroidStrings)
+if (hasIosNativeProject) {
+    fs.writeFileSync(iosInfoPlistPath, nextIosInfoPlist)
+    fs.writeFileSync(iosProjectPath, nextIosProject)
+}
 
-console.log(`✅ Version bumped: ${appJson.expo.version.split('.').slice(0, 3).join('.')} → ${newVersion}`)
-console.log(`   app.json and package.json updated.`)
-console.log(`   Next: git commit -am "chore: bump version to ${newVersion}"`)
+console.log(`✅ Version bumped: ${oldVersion} → ${newVersion}`)
+console.log(`   app.json, package.json, and Android runtime version updated${hasIosNativeProject ? ', along with the local iOS project' : ''}.`)
+console.log('   Next: update CHANGELOG.md, review the diff, then stage and commit the release files.')
 console.log(`   Then: eas build --platform android --profile production`)

@@ -4,20 +4,25 @@
 // This means you never hardcode version strings in your UI.
 
 import Constants from 'expo-constants'
+import * as Application from 'expo-application'
+import { Platform } from 'react-native'
 
-/** Semantic version string e.g. "1.2.0" */
+const isExpoGo = Constants.appOwnership === 'expo'
+const configuredVersion = Constants.expoConfig?.version ?? Constants.manifest?.version ?? 'unknown'
+const configuredBuildNumber = Platform.OS === 'ios'
+    ? Constants.expoConfig?.ios?.buildNumber ?? Constants.manifest?.ios?.buildNumber
+    : Platform.OS === 'android'
+        ? Constants.expoConfig?.android?.versionCode ?? Constants.manifest?.android?.versionCode
+        : undefined
+
+/** Installed binary version; use app config in Expo Go, whose native version is Expo Go's. */
 export const APP_VERSION: string =
-    Constants.expoConfig?.version ??
-    Constants.manifest?.version ??
-    '1.0.0'
+    (!isExpoGo ? Application.nativeApplicationVersion : null) ?? configuredVersion
 
-/** Android versionCode / iOS CFBundleVersion — the build number */
+/** Installed Android versionCode / iOS CFBundleVersion (EAS may manage it remotely). */
 export const BUILD_NUMBER: string =
-    String(
-        Constants.expoConfig?.android?.versionCode ??
-        Constants.manifest?.android?.versionCode ??
-        '1'
-    )
+    (!isExpoGo ? Application.nativeBuildVersion : null) ??
+    String(configuredBuildNumber ?? 'unknown')
 
 /** Full version string e.g. "1.2.0 (42)" */
-export const FULL_VERSION = `${APP_VERSION} (${BUILD_NUMBER})`
+export const FULL_VERSION = BUILD_NUMBER === 'unknown' ? APP_VERSION : `${APP_VERSION} (${BUILD_NUMBER})`

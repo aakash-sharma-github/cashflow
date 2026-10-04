@@ -1,6 +1,6 @@
 # CashFlow — Offline-First Mobile Expense Tracker
 
-> Production-grade collaborative cash book app · React Native · Expo · Supabase
+> Collaborative cash book app · React Native · Expo · Supabase · Current app version: **1.4.3**
 
 [![React Native](https://img.shields.io/badge/React_Native-0.74.5-61DAFB?logo=react)](https://reactnative.dev)
 [![Expo](https://img.shields.io/badge/Expo-51-000020?logo=expo)](https://expo.dev)
@@ -54,20 +54,21 @@ cashflow/
 ├── app.json                        # Expo config (single source of truth)
 ├── eas.json                        # Build profiles: dev / preview / production
 ├── babel.config.js
-├── metro.config.js                 # inlineRequires: true for fast startup
+├── Metro.config.js                 # Metro configuration
 ├── google-services.json            # Firebase config — NOT committed (add your own)
 ├── assets/
 │   ├── icon.png, splash.png, adaptive-icon.png
 │   ├── notification-icon.png
 │   └── sounds/
-│       ├── notification.wav        # Custom invitation sound
+│       ├── invitation.wav          # Custom invitation sound
 │       └── reminder.wav            # Custom reminder sound
 ├── android/app/
 │   └── proguard-rules.pro          # Keeps expo-notifications alarm classes
 ├── supabase/
-│   ├── migrations/                 # 001 → 010b, run in order
+│   ├── migrations/                 # Baseline and additive database changes
 │   ├── functions/
-│   │   └── send-push-notification/ # Legacy Edge Function (replaced by pgmq)
+│   │   ├── cashflow-invite/        # Invitation email dispatch
+│   │   └── send-push-notification/ # Legacy push function
 │   └── email-templates/
 │       └── otp.html                # Dark-themed branded OTP email
 └── src/
@@ -105,10 +106,10 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=eyJ...
 EXPO_PUBLIC_EAS_PROJECT_ID=your-eas-project-id
 ```
 
-### 3. Supabase — run migrations in order
-In Supabase SQL Editor, run `supabase/migrations/001_schema.sql` through `010b_remaining_indexes.sql`.
+### 3. Supabase
+Database changes are tracked in `supabase/migrations/`. The repository contains an initial schema and later additive migrations; its filenames are not a reliable record of what has already been applied to a deployed project. For an existing project, compare the deployed migration history and schema before applying a migration. Do not run every SQL file blindly against production.
 
-Enable Google OAuth and Email OTP in Authentication → Providers.
+Enable Google OAuth and Email OTP in Authentication → Providers, and configure the matching app redirect URLs.
 
 ### 4. Firebase
 1. Create project at [console.firebase.google.com](https://console.firebase.google.com)
@@ -143,6 +144,27 @@ eas build --platform android --profile preview
 eas build --platform android --profile production
 ```
 
+Production uses an Android App Bundle. Preview APKs target ARM Android devices by default; use `-PreactNativeArchitectures=x86_64` for an x86_64 emulator build.
+
+---
+
+## Versioning and releases
+
+`app.json` is the semantic version source of truth. The release bump script synchronizes `package.json` and the Android runtime-version resource. If a generated iOS project is present locally, it synchronizes its version fields too; a clean checkout regenerates iOS settings from `app.json`. Android Gradle reads `versionName` directly from `app.json`.
+
+The app displays the installed binary version and native build number through `expo-application`. In Expo Go it uses the app version from Expo config, since Expo Go's native version belongs to the host app. EAS manages production build numbers remotely; the app reads the number from the installed binary.
+
+```bash
+# Bump and synchronize all app/native versions
+bun run release:patch   # e.g. 1.4.3 → 1.4.4
+# or: bun run release:minor / bun run release:major
+
+# Review synchronized version fields and update CHANGELOG.md
+git diff -- app.json package.json android ios
+```
+
+For GitHub Releases, create a tag such as `v1.4.3`, use the matching `CHANGELOG.md` section as the release notes, and attach the APK/AAB produced by the build. EAS increments production build numbers.
+
 ---
 
 ## Push Notification Architecture
@@ -156,15 +178,15 @@ Entry changes / invitations (server-side):
            → pg_net HTTP POST → Expo Push API → FCM → device
 ```
 
-No Firebase Admin SDK. No Edge Function. Everything runs inside PostgreSQL.
+Push fanout runs in PostgreSQL and uses the Expo Push API; invitation email dispatch is handled by the `cashflow-invite` Edge Function. No Firebase Admin SDK is required on the server.
 
 ---
 
 ## Security
 
-- Row Level Security on all 5 tables, all policies use `(select auth.uid())`
-- All policies scoped to `authenticated` role — anon cannot access any data  
-- SECURITY DEFINER functions revoked from `anon` and `PUBLIC`
+- Row Level Security and API grants protect application data; their definitions are maintained in the Supabase migrations.
+- Profile access is limited to fields used by the app and collaborators; push tokens are private.
+- Public API roles do not have `TRUNCATE` access, and entry updates are limited to editable fields.
 - JWT in hardware-backed SecureStore with chunked adapter (handles >2KB tokens)
 - No passwords — Google OAuth + Magic Link OTP only
 - ProGuard enabled in release builds
@@ -174,12 +196,15 @@ No Firebase Admin SDK. No Edge Function. Everything runs inside PostgreSQL.
 ## Database Schema
 
 ```sql
-profiles      (id, email, full_name, avatar_url, push_token, updated_at)
+profiles      (id, email, full_name, avatar_url, private push token, updated_at)
 books         (id, name, currency, color, owner_id, created_at, updated_at)
-book_members  (book_id, user_id, role, created_at)
+book_members  (book_id, user_id, role, joined_at)
 entries       (id, book_id, user_id, type, amount, note, entry_date, ...)
 invitations   (id, book_id, inviter_id, invitee_email, invitee_id, status, ...)
+invitation_email_dispatches  (internal invitation email delivery controls)
 ```
+
+Ordinary app clients cannot read push tokens or access the internal invitation dispatch table.
 
 ---
 

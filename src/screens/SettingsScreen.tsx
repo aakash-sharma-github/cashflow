@@ -16,7 +16,7 @@ import { useBooksStore } from '../store/booksStore'
 import { themedAlert, themedActionSheet } from '../components/common/ThemedAlert'
 import { COLORS, SPACING, BORDER_RADIUS, FONT_SIZE, SHADOW } from '../constants'
 import { getInitials, getDisplayName } from '../utils'
-import { APP_VERSION, BUILD_NUMBER } from '../utils/version'
+import { FULL_VERSION, APP_VERSION } from '../utils/version'
 import type { BookMember } from '../types'
 import { notificationService } from '@/services/notificationService'
 
@@ -276,7 +276,7 @@ export default function SettingsScreen({ navigation }: any) {
                         sublabel={`CashFlow v${APP_VERSION}`}
                         onPress={() => themedAlert(
                             'CashFlow',
-                            `Version ${APP_VERSION}\n\nA smart, collaborative expense tracker built for teams and individuals.\n\n©${new Date().getFullYear()} CashFlow. All rights reserved.`,
+                            `Version ${FULL_VERSION}\n\nA smart, collaborative expense tracker built for teams and individuals.\n\n©${new Date().getFullYear()} CashFlow. All rights reserved.`,
                             [{ text: 'OK' }]
                         )}
                     />

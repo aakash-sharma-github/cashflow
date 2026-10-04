@@ -16,6 +16,7 @@
         "@supabase/supabase-js": "^2.43.5",
         "date-fns": "^3.6.0",
         "expo": "~51.0.18",
+        "expo-application": "~5.9.1",
         "expo-auth-session": "~5.5.2",
         "expo-build-properties": "~0.12.5",
         "expo-constants": "~16.0.2",

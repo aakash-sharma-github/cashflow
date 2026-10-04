@@ -4,6 +4,7 @@ apply plugin: "com.facebook.react"
 apply plugin: 'com.google.gms.google-services'
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
+def appConfig = new groovy.json.JsonSlurper().parse(new File(projectRoot, 'app.json'))
 
 static def versionToNumber(major, minor, patch) {
   return patch * 100 + minor * 10000 + major * 1000000
@@ -116,7 +117,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
-        versionName "1.4.1"
+        versionName appConfig.expo.version
     }
     signingConfigs {
         debug {
