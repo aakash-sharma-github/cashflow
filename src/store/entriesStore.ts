@@ -94,6 +94,13 @@ function summaryAfterChange(
   }
 }
 
+async function persistActiveSummary(userId: string, bookId: string) {
+  const state = useEntriesStore.getState()
+  if (state.loadedBookId === bookId && state.summary) {
+    await localBookSummaryDb.save(userId, bookId, state.summary)
+  }
+}
+
 export const useEntriesStore = create<EntriesState>((set, get) => ({
   entries: [],
   isLoading: false,
@@ -270,6 +277,7 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
     if (!amount) return { error: "Enter an amount greater than 0 and no greater than 9,999,999,999.99, using a dot and up to 2 decimal places." };
     const userId = useAuthStore.getState().user?.id;
     if (!userId) return { error: "Not authenticated" };
+    if (get().loadedBookId !== bookId) return { error: "Book is not active" };
     const { isOnline, enqueue } = useOfflineStore.getState();
     const id = genTempId();
     const serverId = createSyncId();
@@ -295,10 +303,11 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
         : { cash_out: amount };
 
     set((state) => {
+      if (state.loadedBookId !== bookId) return {}
       const next = [optimistic, ...state.entries]
       return { entries: next, summary: summaryAfterChange(state.summary, state.entries, undefined, optimistic), summarySource: 'optimistic' }
     })
-    if (get().summary) await localBookSummaryDb.save(userId, bookId, get().summary!)
+    await persistActiveSummary(userId, bookId)
     await localEntriesDb.upsert(userId, bookId, optimistic);
     useBooksStore.getState().updateBookBalance(bookId, delta);
 
@@ -319,10 +328,11 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
       });
       if (!queued) {
         set((state) => {
+          if (state.loadedBookId !== bookId) return {}
           const next = state.entries.filter((entry) => entry.id !== id);
           return { entries: next, summary: previousSummary ?? computeSummary(next), summarySource: previousSummarySource };
         });
-        if (get().summary) await localBookSummaryDb.save(userId, bookId, get().summary!)
+        await persistActiveSummary(userId, bookId)
         await localEntriesDb.remove(userId, bookId, id);
         await useBooksStore.getState().updateBookBalance(bookId,
           formData.type === "cash_in" ? { cash_in: subtractMoney(0, amount) } : { cash_out: subtractMoney(0, amount) });
@@ -342,10 +352,11 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
       });
       if (!queued) {
         set((state) => {
+          if (state.loadedBookId !== bookId) return {}
           const next = state.entries.filter((entry) => entry.id !== id);
           return { entries: next, summary: previousSummary ?? computeSummary(next), summarySource: previousSummarySource };
         });
-        if (get().summary) await localBookSummaryDb.save(userId, bookId, get().summary!)
+        await persistActiveSummary(userId, bookId)
         await localEntriesDb.remove(userId, bookId, id);
         await useBooksStore.getState().updateBookBalance(bookId,
           formData.type === "cash_in" ? { cash_in: subtractMoney(0, amount) } : { cash_out: subtractMoney(0, amount) });
@@ -354,12 +365,13 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
       return { error: null };
     }
     set((state) => {
+      if (state.loadedBookId !== bookId) return {}
       const next = state.entries.map((e) => (e.id === id ? data! : e));
       return { entries: next, summary: state.summary ?? computeSummary(next), summarySource: 'server' };
     });
     await localEntriesDb.remove(userId, bookId, id);
     await localEntriesDb.upsert(userId, bookId, data!);
-    if (get().summary) await localBookSummaryDb.save(userId, bookId, get().summary!)
+    await persistActiveSummary(userId, bookId)
     return { error: null };
   },
 
@@ -368,7 +380,7 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
     if (!userId) return { error: "Not authenticated" };
     const { isOnline, enqueue } = useOfflineStore.getState();
     const existing = get().entries.find((e) => e.id === id);
-    if (!existing) return { error: "Entry not found" };
+    if (!existing || existing.book_id !== bookId || get().loadedBookId !== bookId) return { error: "Entry not found in the active book" };
     const normalizedAmount = formData.amount === undefined ? undefined : normalizeEntryAmount(formData.amount);
     if (formData.amount !== undefined && !normalizedAmount) return { error: "Enter an amount greater than 0 and no greater than 9,999,999,999.99, using a dot and up to 2 decimal places." };
     const updated = {
@@ -390,11 +402,13 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
       cash_out: subtractMoney(updated.type === "cash_out" ? updated.amount : 0, existing.type === "cash_out" ? existing.amount : 0),
     };
     set((state) => ({
+      ...(state.loadedBookId !== bookId ? {} : {
       entries: state.entries.map((e) => (e.id === id ? updated : e)),
       summary: summaryAfterChange(state.summary, state.entries, existing, updated as Entry),
       summarySource: 'optimistic',
+      }),
     }));
-    if (get().summary) await localBookSummaryDb.save(userId, bookId, get().summary!)
+    await persistActiveSummary(userId, bookId)
     await localEntriesDb.upsert(userId, bookId, updated as Entry);
     await useBooksStore.getState().updateBookBalance(bookId, bookDelta);
     if (!isOnline) {
@@ -410,8 +424,8 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
         },
       });
       if (!queued) {
-        set((state) => ({ entries: state.entries.map((entry) => entry.id === id ? existing : entry), summary: previousSummary ?? computeSummary(state.entries), summarySource: previousSummarySource }));
-        if (get().summary) await localBookSummaryDb.save(userId, bookId, get().summary!)
+        set((state) => state.loadedBookId !== bookId ? {} : ({ entries: state.entries.map((entry) => entry.id === id ? existing : entry), summary: previousSummary ?? computeSummary(state.entries), summarySource: previousSummarySource }));
+        await persistActiveSummary(userId, bookId)
         await localEntriesDb.upsert(userId, bookId, existing);
         await useBooksStore.getState().updateBookBalance(bookId, {
           cash_in: subtractMoney(0, bookDelta.cash_in), cash_out: subtractMoney(0, bookDelta.cash_out),
@@ -434,11 +448,13 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
       });
       if (queued) return { error: null };
       set((state) => ({
+        ...(state.loadedBookId !== bookId ? {} : {
         entries: state.entries.map((entry) => entry.id === id ? existing : entry),
         summary: previousSummary ?? computeSummary(state.entries),
         summarySource: previousSummarySource,
+        }),
       }));
-      if (get().summary) await localBookSummaryDb.save(userId, bookId, get().summary!)
+      await persistActiveSummary(userId, bookId)
       await localEntriesDb.upsert(userId, bookId, existing);
       await useBooksStore.getState().updateBookBalance(bookId, {
         cash_in: subtractMoney(0, bookDelta.cash_in),
@@ -447,12 +463,13 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
       return { error: `${error}. Pending edit could not be stored on this device.` };
     }
     set((state) => {
+      if (state.loadedBookId !== bookId) return {}
       const next = state.entries.map((e) => (e.id === id ? data! : e));
       return { entries: next.map(entry => entry.id === id ? { ...data!, sync_status: 'synced' as const } : entry), summary: state.summary ?? computeSummary(next), summarySource: 'server' };
     });
-    if (get().summary) await localBookSummaryDb.save(userId, bookId, get().summary!)
+    await persistActiveSummary(userId, bookId)
     await localEntriesDb.upsert(userId, bookId, data!);
-    useBooksStore.getState().fetchBook(bookId);
+    if (get().loadedBookId === bookId) useBooksStore.getState().fetchBook(bookId);
     return { error: null };
   },
 
@@ -461,14 +478,15 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
     if (!userId) return { error: "Not authenticated" };
     const { isOnline, enqueue } = useOfflineStore.getState();
     const existing = get().entries.find((e) => e.id === id);
-    if (!existing) return { error: "Entry not found" };
+    if (!existing || existing.book_id !== bookId || get().loadedBookId !== bookId) return { error: "Entry not found in the active book" };
     const previousSummary = get().summary;
     const previousSummarySource = get().summarySource;
     set((state) => {
+      if (state.loadedBookId !== bookId) return {}
       const next = state.entries.filter((e) => e.id !== id);
       return { entries: next, summary: summaryAfterChange(state.summary, state.entries, existing), summarySource: 'optimistic' };
     });
-    if (get().summary) await localBookSummaryDb.save(userId, bookId, get().summary!)
+    await persistActiveSummary(userId, bookId)
     await localEntriesDb.remove(userId, bookId, id);
     const r =
       existing.type === "cash_in"
@@ -483,8 +501,8 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
         payload: { entryId: id, bookId },
       });
       if (!queued) {
-        set((state) => ({ entries: [existing, ...state.entries], summary: previousSummary ?? computeSummary(state.entries), summarySource: previousSummarySource }));
-        if (get().summary) await localBookSummaryDb.save(userId, bookId, get().summary!)
+        set((state) => state.loadedBookId !== bookId ? {} : ({ entries: [existing, ...state.entries], summary: previousSummary ?? computeSummary(state.entries), summarySource: previousSummarySource }));
+        await persistActiveSummary(userId, bookId)
         await localEntriesDb.upsert(userId, bookId, existing);
         await useBooksStore.getState().updateBookBalance(bookId, {
           cash_in: existing.type === "cash_in" ? existing.amount : 0,
@@ -499,11 +517,13 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
       const queued = await enqueue({ id: `op_del_${id}`, type: "DELETE_ENTRY", userId, payload: { entryId: id, bookId } });
       if (queued) return { error: null };
       set((state) => ({
+        ...(state.loadedBookId !== bookId ? {} : {
         entries: [existing, ...state.entries],
         summary: previousSummary ?? computeSummary(state.entries),
         summarySource: previousSummarySource,
+        }),
       }));
-      if (get().summary) await localBookSummaryDb.save(userId, bookId, get().summary!)
+      await persistActiveSummary(userId, bookId)
       await localEntriesDb.upsert(userId, bookId, existing);
       await useBooksStore.getState().updateBookBalance(bookId, {
         cash_in: existing.type === "cash_in" ? existing.amount : 0,
@@ -563,12 +583,13 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
     await localEntriesDb.save(userId, entry.book_id, nextCache)
     set(state => {
       const old = state.entries.find(item => item.id === entry.id)
+      const previousForSummary = previous ?? old
       const visible = state.filter === 'all' || entry.type === state.filter
       const nextEntries = state.entries.filter(item => item.id !== entry.id)
       if (visible) nextEntries.push({ ...entry, sync_status: 'synced' })
       return {
         entries: nextEntries.sort((a,b) => new Date(b.entry_date).getTime() - new Date(a.entry_date).getTime()),
-        summary: old ? summaryAfterChange(state.summary, state.entries, old, entry) : state.summary,
+        summary: previousForSummary ? summaryAfterChange(state.summary, state.entries, previousForSummary, entry) : state.summary,
         summarySource: 'server',
       }
     })

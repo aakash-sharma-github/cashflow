@@ -27,6 +27,7 @@ ios/
 
 # testing
 __tests__/
+!src/store/__tests__/
 
 # Development based md files
 final_apk/

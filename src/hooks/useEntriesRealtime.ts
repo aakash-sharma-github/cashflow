@@ -9,6 +9,10 @@ import { notificationService } from '../services/notificationService'
 import { formatAmount } from '../utils'
 import { entriesService } from '../services/entriesService'
 
+function isBookActive(bookId: string) {
+  return useEntriesStore.getState().loadedBookId === bookId
+}
+
 /**
  * Subscribes to real-time changes for entries in a specific book.
  * Automatically updates the entries store when changes come in from other users.
@@ -62,7 +66,7 @@ export function useEntriesRealtime(bookId: string, bookName?: string) {
               )
             }
           }
-          if (useAuthStore.getState().user?.id === eventUserId) fetchBook(bookId)
+          if (useAuthStore.getState().user?.id === eventUserId && isBookActive(bookId)) fetchBook(bookId)
         }
       )
       .on(
@@ -89,7 +93,7 @@ export function useEntriesRealtime(bookId: string, bookName?: string) {
             // reliably tell if the current user is the editor from this payload.
             // The server-side pgmq trigger uses auth.uid() and handles this correctly.
           }
-          if (useAuthStore.getState().user?.id === eventUserId) fetchBook(bookId)
+          if (useAuthStore.getState().user?.id === eventUserId && isBookActive(bookId)) fetchBook(bookId)
         }
       )
       .on(
@@ -112,7 +116,7 @@ export function useEntriesRealtime(bookId: string, bookName?: string) {
           //           and sends the correct push notification to other members.
           // Sending a local notification here would cause the deleter to receive
           // a notification about their own deletion.
-          if (useAuthStore.getState().user?.id === currentUserId) fetchBook(bookId)
+          if (useAuthStore.getState().user?.id === currentUserId && isBookActive(bookId)) fetchBook(bookId)
         }
       )
       .subscribe()
