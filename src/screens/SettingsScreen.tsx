@@ -7,7 +7,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient'
-import { Ionicons } from '@expo/vector-icons'
+import Ionicons from '@expo/vector-icons/Ionicons'
 import { useFocusEffect } from '@react-navigation/native'
 import { useAuthStore } from '../store/authStore'
 import { useThemeStore, getTheme } from '../store/themeStore'
@@ -35,22 +35,24 @@ export default function SettingsScreen({ navigation }: any) {
     }, [books]))
 
     const loadAllMembers = async () => {
-        if (!books.length) return
+        if (!books.length) {
+            setAllMembers([])
+            setLoadingMembers(false)
+            return
+        }
         setLoadingMembers(true)
         // Collect all members across all books, deduplicate by user_id,
         // exclude the current user (they see themselves in the Profile section).
         const seen = new Set<string>()
         const unique: BookMember[] = []
-        for (const book of books) {
-            const { data } = await invitationsService.getBookMembers(book.id)
-            if (data) {
-                for (const m of data) {
-                    // Skip self and skip if already added
-                    if (m.user_id === user?.id) continue
-                    if (seen.has(m.user_id)) continue
-                    seen.add(m.user_id)
-                    unique.push(m)
-                }
+        const { data } = await invitationsService.getMembersForBooks(books.map(book => book.id))
+        if (data) {
+            for (const m of data) {
+                // Skip self and skip if already added
+                if (m.user_id === user?.id) continue
+                if (seen.has(m.user_id)) continue
+                seen.add(m.user_id)
+                unique.push(m)
             }
         }
         setAllMembers(unique)

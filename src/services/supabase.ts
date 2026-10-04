@@ -145,4 +145,14 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
 })
 
+/**
+ * Get the locally hydrated identity for read/cache scoping without making an
+ * extra Auth `/user` request. Database reads still go through PostgREST/RPC
+ * and are authorized by the access token and RLS on the server.
+ */
+export async function getSessionUser() {
+  const { data, error } = await supabase.auth.getSession()
+  return { user: data.session?.user ?? null, error }
+}
+
 export default supabase

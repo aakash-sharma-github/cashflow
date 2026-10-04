@@ -9,7 +9,7 @@
 
 import React, { useEffect, useRef, useCallback } from 'react'
 import { View, Text, StyleSheet, Animated, TouchableOpacity } from 'react-native'
-import { Ionicons } from '@expo/vector-icons'
+import Ionicons from '@expo/vector-icons/Ionicons'
 import { useOfflineStore } from '../../store/offlineStore'
 import { useOfflineSync } from '../../hooks/useOfflineSync'
 import { useAuthStore } from '../../store/authStore'

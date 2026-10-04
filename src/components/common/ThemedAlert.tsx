@@ -12,7 +12,7 @@ import {
     Pressable, Animated, Dimensions,
 } from 'react-native'
 import { LinearGradient } from 'expo-linear-gradient'
-import { Ionicons } from '@expo/vector-icons'
+import Ionicons from '@expo/vector-icons/Ionicons'
 import { useThemeStore, getTheme } from '../../store/themeStore'
 import { COLORS, SPACING, BORDER_RADIUS, FONT_SIZE, SHADOW } from '../../constants'
 

@@ -6,7 +6,7 @@ import {
   ScrollView, ActivityIndicator, Platform,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { Ionicons } from '@expo/vector-icons'
+import Ionicons from '@expo/vector-icons/Ionicons'
 import { useBooksStore } from '../store/booksStore'
 import { useThemeStore, getTheme } from '../store/themeStore'
 import { themedAlert } from '../components/common/ThemedAlert'

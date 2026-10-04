@@ -2,7 +2,7 @@
 import React from 'react'
 import { ScrollView, Text, View, StyleSheet, TouchableOpacity, Linking, Image } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { Ionicons } from '@expo/vector-icons'
+import Ionicons from '@expo/vector-icons/Ionicons'
 import { useThemeStore, getTheme } from '../store/themeStore'
 import { SPACING, FONT_SIZE, COLORS } from '../constants'
 

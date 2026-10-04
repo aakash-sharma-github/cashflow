@@ -161,6 +161,20 @@ export const invitationsService = {
     return { data: data || [], error: null }
   },
 
+  /** Get members for several books in one request (used by Settings). */
+  async getMembersForBooks(bookIds: string[]): Promise<ApiResponse<BookMember[]>> {
+    if (bookIds.length === 0) return { data: [], error: null }
+    const { data, error } = await supabase
+      .from('book_members')
+      .select('id,book_id,user_id,role,joined_at,profile:profiles(id,email,full_name,avatar_url)')
+      .in('book_id', bookIds)
+      .order('joined_at', { ascending: true })
+      .returns<BookMember[]>()
+
+    if (error) return { data: null, error: error.message }
+    return { data: data || [], error: null }
+  },
+
   /**
    * Remove a member from a book (owner only)
    */

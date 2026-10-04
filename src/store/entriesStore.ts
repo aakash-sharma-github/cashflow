@@ -173,8 +173,12 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
 
     // ── Step 3: Online — fetch fresh data from server ────────────
     try {
-      const { data, error } = await entriesService.getEntries(bookId, get().filter, 0, userId);
-      const { data: summary, error: summaryError } = await entriesService.getBookSummary(bookId, userId);
+      const [entriesResult, summaryResult] = await Promise.all([
+        entriesService.getEntries(bookId, get().filter, 0, userId),
+        entriesService.getBookSummary(bookId, userId),
+      ]);
+      const { data, error } = entriesResult;
+      const { data: summary, error: summaryError } = summaryResult;
       if (generation !== fetchGeneration || useAuthStore.getState().user?.id !== userId || get().loadedBookId !== bookId) return
       if (summaryError) logger.warn(`[Entries] authoritative summary unavailable for ${bookId}:`, summaryError);
 

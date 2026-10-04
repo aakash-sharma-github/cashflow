@@ -9,7 +9,7 @@
 //     not treat a local cache or the visible page as complete financial data.
 //   • getBookSummary — uses a lightweight `amount,type` only query (no joins).
 
-import supabase from './supabase'
+import supabase, { getSessionUser } from './supabase'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import type { Entry, EntryFormData, EntryFilter, ApiResponse } from '../types'
 import { PAGE_SIZE } from '../constants'
@@ -50,7 +50,7 @@ export const entriesService = {
     page = 0,
     expectedUserId?: string,
   ): Promise<ApiResponse<Entry[]>> {
-    const { data: { user } } = await supabase.auth.getUser()
+    const { user } = await getSessionUser()
     if (!user) return { data: null, error: 'Not authenticated' }
     if (expectedUserId && user.id !== expectedUserId) return { data: null, error: 'Authenticated account changed before entries loaded' }
 
@@ -89,7 +89,7 @@ export const entriesService = {
     filter: EntryFilter = 'all'
   ): Promise<ApiResponse<Entry[]>> {
     try {
-      const { data: { user }, error: authError } = await supabase.auth.getUser()
+      const { user, error: authError } = await getSessionUser()
       if (authError || !user) return { data: null, error: authError?.message ?? 'Not authenticated' }
 
       const hasPendingBookEntries = useOfflineStore.getState().pendingQueue.some(op => {
@@ -304,7 +304,7 @@ export const entriesService = {
   },
 
   async applyRealtimeEntry(entry: Entry, expectedUserId?: string): Promise<void> {
-    const { data: { user } } = await supabase.auth.getUser()
+    const { user } = await getSessionUser()
     if (!user || expectedUserId && user.id !== expectedUserId) return
     const display = await readDisplayCache(user.id, entry.book_id)
     const next = [entry, ...display.filter(item => item.id !== entry.id)]
@@ -314,7 +314,7 @@ export const entriesService = {
   },
 
   async applyRealtimeDelete(bookId: string, entryId: string, expectedUserId?: string): Promise<void> {
-    const { data: { user } } = await supabase.auth.getUser()
+    const { user } = await getSessionUser()
     if (!user || expectedUserId && user.id !== expectedUserId) return
     const display = await readDisplayCache(user.id, bookId)
     await writeDisplayCache(user.id, bookId, display.filter(entry => entry.id !== entryId))
@@ -324,7 +324,7 @@ export const entriesService = {
    * Invalidate the display cache for a book — call after batch deletes.
    */
   async invalidateBookCache(bookId: string): Promise<void> {
-    const { data: { user } } = await supabase.auth.getUser()
+    const { user } = await getSessionUser()
     if (!user) return
     try { await AsyncStorage.removeItem(displayCacheKey(user.id, bookId)) } catch { }
   },
@@ -339,7 +339,7 @@ export const entriesService = {
     cash_out: string
     entry_count: number
   }>> {
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    const { user, error: authError } = await getSessionUser()
     if (authError || !user) return { data: null, error: authError?.message ?? 'Not authenticated' }
     if (expectedUserId && user.id !== expectedUserId) return { data: null, error: 'Authenticated account changed before summary loaded' }
     const { data, error } = await supabase.rpc('get_book_financial_summaries_exact', {

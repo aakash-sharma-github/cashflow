@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import AppLogo from "../components/common/AppLogo";
 import { useAuthStore } from "../store/authStore";
 import { themedAlert } from "../components/common/ThemedAlert";

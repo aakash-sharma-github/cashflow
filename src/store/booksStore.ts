@@ -117,10 +117,23 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       const { data } = await booksService.getBook(id)
       if (generation !== bookFetchGeneration || useAuthStore.getState().user?.id !== userId) return
       if (data) {
-        set({ currentBook: data })
+        // getBook refreshes book metadata only. Keep server summary values
+        // already loaded by the books list/cache; the entries screen owns
+        // its own authoritative summary request.
+        const existing = get().books.find(book => book.id === id)
+          ?? (get().currentBook?.id === id ? get().currentBook : undefined)
+        const refreshed: Book = {
+          ...existing,
+          ...data,
+          cash_in: data.cash_in ?? existing?.cash_in,
+          cash_out: data.cash_out ?? existing?.cash_out,
+          balance: data.balance ?? existing?.balance,
+          member_count: data.member_count ?? existing?.member_count,
+        }
+        set({ currentBook: refreshed })
         // Also update the book in the list
-        set(state => ({ books: state.books.map(b => b.id === id ? data : b) }))
-        if (userId) await localBooksDb.upsert(userId, data)
+        set(state => ({ books: state.books.map(b => b.id === id ? refreshed : b) }))
+        if (userId) await localBooksDb.upsert(userId, refreshed)
       }
     } catch (e) {
       logger.warn('[Books] fetchBook exception:', e)

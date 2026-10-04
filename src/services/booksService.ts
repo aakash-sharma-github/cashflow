@@ -1,5 +1,5 @@
 // src/services/booksService.ts
-import supabase from './supabase'
+import supabase, { getSessionUser } from './supabase'
 import type { Book, BookFormData, ApiResponse } from '../types'
 
 export const booksService = {
@@ -8,13 +8,13 @@ export const booksService = {
    * with computed balance, member count, and role
    */
   async getBooks(): Promise<ApiResponse<Book[]>> {
-    const { data: { user } } = await supabase.auth.getUser()
+    const { user } = await getSessionUser()
     if (!user) return { data: null, error: 'Not authenticated' }
 
     const [{ data, error }, { data: summaries, error: summaryError }] = await Promise.all([
       supabase
         .from('books')
-        .select('*, book_members!inner(role, user_id)')
+        .select('id,name,description,color,currency,owner_id,created_at,updated_at,book_members!inner(role,user_id)')
         .eq('book_members.user_id', user.id)
         .order('created_at', { ascending: false }),
       supabase.rpc('get_book_financial_summaries_exact', { p_book_id: null }),
@@ -48,22 +48,17 @@ export const booksService = {
    * Get a single book by ID
    */
   async getBook(id: string): Promise<ApiResponse<Book>> {
-    const { data: { user } } = await supabase.auth.getUser()
+    const { user } = await getSessionUser()
     if (!user) return { data: null, error: 'Not authenticated' }
 
-    const [{ data, error }, { data: summaries, error: summaryError }] = await Promise.all([
-      supabase
-        .from('books')
-        .select('*, book_members!inner(role, user_id)')
-        .eq('id', id)
-        .eq('book_members.user_id', user.id)
-        .single(),
-      supabase.rpc('get_book_financial_summaries_exact', { p_book_id: id }),
-    ])
+    const { data, error } = await supabase
+      .from('books')
+      .select('id,name,description,color,currency,owner_id,created_at,updated_at,book_members!inner(role,user_id)')
+      .eq('id', id)
+      .eq('book_members.user_id', user.id)
+      .single()
 
-    if (error || summaryError) return { data: null, error: (error || summaryError)!.message }
-    const summary: any = summaries?.find((item: any) => item.book_id === id)
-    if (!summary) return { data: null, error: 'Book not found or unavailable' }
+    if (error) return { data: null, error: error.message }
 
     const myMembership = data.book_members?.find((m: any) => m.user_id === user.id)
 
@@ -72,10 +67,6 @@ export const booksService = {
       data: {
         ...bookData,
         role: myMembership?.role,
-        cash_in: String(summary.cash_in),
-        cash_out: String(summary.cash_out),
-        balance: String(summary.balance),
-        member_count: Number(summary.member_count),
       },
       error: null,
     }
