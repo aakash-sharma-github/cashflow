@@ -1,36 +1,36 @@
 // src/store/authStore.ts
 //
-// OFFLINE AUTH STRATEGY:
-//
-// Problem: Supabase JWTs expire after 1 hour. When the app is opened after
-// being offline for hours, supabase.auth.getSession() tries to refresh the JWT.
-// With no internet, the refresh fails and getSession() returns null — not an
-// error, just null. The previous code saw null and logged the user out.
-//
-// Fix: A three-layer fallback in initialize():
-//   Layer 1: getSession() succeeds (JWT valid or refresh worked) → normal flow
-//   Layer 2: getSession() returns null BUT we have a cached profile → stay logged in
-//   Layer 3: getSession() throws → catch block checks cache → stay logged in
-//
-// The cached profile is written to AsyncStorage on every successful login and
-// profile refresh. AsyncStorage survives app restarts and never expires.
-// The user is only truly logged out when they explicitly tap Sign Out, which
-// clears the cache first.
-//
-// This means: as long as the user has signed in at least once, they will
-// NEVER be logged out by lack of internet, regardless of how long the JWT
-// has been expired or how long the phone has been offline.
-
 import { create } from 'zustand'
 import type { Profile } from '../types'
 import { authService } from '../services/authService'
 import { logger } from '../utils/logger'
+import { useBooksStore } from './booksStore'
+import { useEntriesStore } from './entriesStore'
+import { useInboxStore } from './inboxStore'
+import { useTodoStore } from './todoStore'
+
+let initialization: Promise<void> | null = null
+let authEventVersion = 0
+
+function resetUserScopedMemory() {
+  useBooksStore.getState().reset()
+  useEntriesStore.getState().reset()
+  useInboxStore.getState().clear()
+  useTodoStore.getState().reset()
+}
+
+function isNetworkFailure(error: string): boolean {
+  return /network|fetch|timeout|timed out|abort|offline|connection/i.test(error)
+}
 
 interface AuthState {
   user: Profile | null
   isLoading: boolean
   isAuthenticated: boolean
+  /** Cached, identity-matched local mode. It does not authorize Supabase calls. */
+  isOfflineMode: boolean
   initialize: () => Promise<void>
+  resolveOnlineSession: () => Promise<void>
   sendOtp: (email: string) => Promise<{ error: string | null }>
   verifyOtp: (email: string, token: string) => Promise<{ error: string | null }>
   signInWithGoogle: () => Promise<{ error: string | null }>
@@ -43,145 +43,115 @@ export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   isLoading: true,
   isAuthenticated: false,
+  isOfflineMode: false,
 
-  initialize: async () => {
-    // Hard timeout — never block the app longer than 8 seconds on startup
-    const timeout = setTimeout(() => {
-      // On timeout, try to recover from cache before giving up
-      authService.getCachedProfile().then(cached => {
-        if (cached) {
-          set({ user: cached, isAuthenticated: true, isLoading: false })
-        } else {
-          set({ user: null, isAuthenticated: false, isLoading: false })
-        }
-      }).catch(() => {
-        set({ user: null, isAuthenticated: false, isLoading: false })
+  initialize: () => {
+    if (initialization) return initialization
+    set({ isLoading: true })
+    initialization = new Promise<void>((resolve) => {
+      let settled = false
+      const finishInitial = () => {
+        if (settled) return
+        settled = true
+        clearTimeout(timeout)
+        resolve()
+      }
+      const timeout = setTimeout(() => {
+        logger.warn('[Auth] Session restoration timed out; waiting state ended without trusting cached identity')
+        set({ user: null, isAuthenticated: false, isOfflineMode: false, isLoading: false })
+        finishInitial()
+      }, 10000)
+
+      // Subscribe before resolving startup. Supabase emits INITIAL_SESSION
+      // after its persisted storage adapter has finished restoring the session.
+      const { data } = authService.onAuthStateChange((event, session) => {
+        if (!['INITIAL_SESSION', 'SIGNED_IN', 'SIGNED_OUT', 'TOKEN_REFRESHED', 'USER_UPDATED'].includes(event)) return
+        const version = ++authEventVersion
+
+        // Never await Supabase calls from inside its auth callback: the auth
+        // client serializes these callbacks with its internal lock.
+        setTimeout(() => {
+          void (async () => {
+            if (event === 'SIGNED_OUT' || !session?.user?.id) {
+              const offlineProfile = event === 'INITIAL_SESSION' || event === 'SIGNED_OUT'
+                ? await authService.getOfflineCachedProfile()
+                : null
+              if ((event === 'INITIAL_SESSION' || event === 'SIGNED_OUT') && offlineProfile && version === authEventVersion) {
+                set({ user: offlineProfile, isAuthenticated: false, isOfflineMode: true, isLoading: false })
+                finishInitial()
+                return
+              }
+              resetUserScopedMemory()
+              set({ user: null, isAuthenticated: false, isOfflineMode: false, isLoading: false })
+              finishInitial()
+              return
+            }
+
+            const sessionUserId = session.user.id
+            const oldUserId = useAuthStore.getState().user?.id
+            if (oldUserId && oldUserId !== sessionUserId) resetUserScopedMemory()
+            if (event === 'INITIAL_SESSION' || oldUserId !== sessionUserId) {
+              set({ user: null, isAuthenticated: false, isOfflineMode: false, isLoading: true })
+            }
+
+            const { data: profile, error } = await authService.getProfile(sessionUserId)
+            if (version !== authEventVersion) return
+
+            if (profile && profile.id === sessionUserId) {
+              set({ user: profile, isAuthenticated: true, isOfflineMode: false, isLoading: false })
+              finishInitial()
+              return
+            }
+
+            // Offline shell is allowed only when a persisted session names the
+            // same account and the server failure is clearly a transport issue.
+            // It never authorizes Supabase writes or realtime subscriptions.
+            const cached = error && isNetworkFailure(error)
+              ? await authService.getCachedProfile(sessionUserId)
+              : null
+            if (version !== authEventVersion) return
+            if (cached) {
+              set({ user: cached, isAuthenticated: false, isOfflineMode: true, isLoading: false })
+            } else {
+              set({ user: null, isAuthenticated: false, isOfflineMode: false, isLoading: false })
+            }
+            finishInitial()
+          })().catch((error) => {
+            if (version !== authEventVersion) return
+            logger.warn('[Auth] Failed to resolve auth event:', error)
+            set({ user: null, isAuthenticated: false, isOfflineMode: false, isLoading: false })
+            finishInitial()
+          })
+        }, 0)
       })
-    }, 8000)
-
-    try {
-      // ── Layer 1: Try to get a valid session (reads from SecureStore,
-      // attempts token refresh if JWT expired) ────────────────────────
-      const session = await authService.getSession()
-
-      if (session) {
-        // Session is valid — try to load profile from network or cache
-        const { data: profile } = await authService.getProfile()
-        if (profile) {
-          set({ user: profile, isAuthenticated: true, isLoading: false })
-        } else {
-          // Profile fetch failed but session is valid — use cache
-          const cached = await authService.getCachedProfile()
-          if (cached) {
-            set({ user: cached, isAuthenticated: true, isLoading: false })
-          } else {
-            set({ user: null, isAuthenticated: false, isLoading: false })
-          }
-        }
-
-      } else {
-        // ── Layer 2: getSession() returned null
-        // This happens when:
-        //   (a) JWT expired AND no internet for refresh — user is offline
-        //   (b) ChunkedSecureStore read is still in progress (race condition)
-        //
-        // For (b): retry getSession() after 800ms to let SecureStore finish
-        // For (a): fall back to cached profile
-
-        // Retry once — solves the race condition where SecureStore
-        // hasn't finished loading by the time getSession() is first called
-        await new Promise(r => setTimeout(r, 800))
-        const retrySession = await authService.getSession()
-
-        if (retrySession) {
-          // SecureStore just needed more time — session is now valid
-          logger.info('[Auth] Session loaded on retry (SecureStore was still reading)')
-          const { data: profile } = await authService.getProfile()
-          if (profile) {
-            set({ user: profile, isAuthenticated: true, isLoading: false })
-          } else {
-            const cached = await authService.getCachedProfile()
-            set({ user: cached, isAuthenticated: !!cached, isLoading: false })
-          }
-        } else {
-          // Genuinely no session — check cache for offline recovery
-          const cached = await authService.getCachedProfile()
-          if (cached) {
-            logger.info('[Auth] No session (offline/expired) — restoring from cached profile')
-            // NOTE: The Supabase client will NOT have a valid JWT in this state.
-            // API calls will fail with "Not authenticated" until connectivity
-            // is restored and the client can refresh the token.
-            // booksStore and entriesStore handle this gracefully by showing
-            // cached local data when network calls fail.
-            set({ user: cached, isAuthenticated: true, isLoading: false })
-          } else {
-            set({ user: null, isAuthenticated: false, isLoading: false })
-          }
-        }
-      }
-
-    } catch (e) {
-      // ── Layer 3: getSession() itself threw — SecureStore locked or crashed
-      // Still try the cache before logging out
-      logger.warn('[Auth] initialize() error — falling back to cache:', e)
-      try {
-        const cached = await authService.getCachedProfile()
-        if (cached) {
-          set({ user: cached, isAuthenticated: true, isLoading: false })
-        } else {
-          set({ user: null, isAuthenticated: false, isLoading: false })
-        }
-      } catch {
-        set({ user: null, isAuthenticated: false, isLoading: false })
-      }
-    } finally {
-      clearTimeout(timeout)
-    }
-
-    // ── Auth state listener ─────────────────────────────────────────
-    // Handles events AFTER initialization (sign-in, token refresh, sign-out)
-    authService.onAuthStateChange(async (event, session) => {
-
-      if (event === 'SIGNED_IN' && session) {
-        // Fresh sign-in — load profile from network and cache it
-        setTimeout(async () => {
-          try {
-            const { data: profile } = await authService.getProfile()
-            if (profile) set({ user: profile, isAuthenticated: true, isLoading: false })
-          } catch {
-            set({ isAuthenticated: true, isLoading: false })
-          }
-        }, 500)
-
-      } else if (event === 'TOKEN_REFRESHED') {
-        // JWT silently refreshed — no UI change needed
-        logger.info('[Auth] Token refreshed silently')
-
-      } else if (event === 'SIGNED_OUT') {
-        // Supabase fires SIGNED_OUT for TWO different reasons:
-        //   (a) Explicit signOut() call — user tapped Sign Out → SHOULD log out
-        //   (b) Token refresh failed while app was backgrounded → should NOT log out
-        //
-        // We distinguish them by checking the profile cache:
-        //   - signOut() clears the cache BEFORE calling supabase.auth.signOut()
-        //     so by the time this event fires, getCachedProfile() returns null → log out
-        //   - Token refresh failure leaves the cache intact → restore from cache
-        const cached = await authService.getCachedProfile()
-        if (cached) {
-          logger.info('[Auth] SIGNED_OUT (token refresh failure) — restoring from cache')
-          set({ user: cached, isAuthenticated: true, isLoading: false })
-        } else {
-          // Cache was cleared by explicit signOut() — proceed with logout
-          set({ user: null, isAuthenticated: false, isLoading: false })
-        }
-
-      } else if (event === 'USER_UPDATED') {
-        try {
-          const { data: profile } = await authService.getProfile()
-          if (profile) set({ user: profile })
-        } catch { }
-      }
+      void data.subscription // Keep one Supabase listener for the app lifetime.
     })
+    return initialization
+  },
+
+  resolveOnlineSession: async () => {
+    const version = authEventVersion
+    const before = useAuthStore.getState().user?.id
+    const session = await authService.getSession()
+    if (version !== authEventVersion || !useAuthStore.getState().isOfflineMode) return
+    if (!session?.user?.id) {
+      if (before) resetUserScopedMemory()
+      set({ user: null, isAuthenticated: false, isOfflineMode: false, isLoading: false })
+      return
+    }
+    const { data: profile, error } = await authService.getProfile(session.user.id)
+    if (version !== authEventVersion || !useAuthStore.getState().isOfflineMode) return
+    if (profile && profile.id === session.user.id) {
+      if (before && before !== profile.id) resetUserScopedMemory()
+      set({ user: profile, isAuthenticated: true, isOfflineMode: false, isLoading: false })
+    } else if (error && isNetworkFailure(error)) {
+      const cached = await authService.getCachedProfile(session.user.id)
+      if (version !== authEventVersion || !useAuthStore.getState().isOfflineMode) return
+      set({ user: cached, isAuthenticated: false, isOfflineMode: !!cached, isLoading: false })
+    } else {
+      resetUserScopedMemory()
+      set({ user: null, isAuthenticated: false, isOfflineMode: false, isLoading: false })
+    }
   },
 
   sendOtp: async (email) => {
@@ -193,7 +163,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     const { error } = await authService.verifyOtp(email, token)
     if (!error) {
       const { data: profile } = await authService.getProfile()
-      set({ user: profile, isAuthenticated: true })
+      if (profile) set({ user: profile, isAuthenticated: true, isOfflineMode: false, isLoading: false })
     }
     return { error: error ?? null }
   },
@@ -211,14 +181,16 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   signOut: async () => {
-    // MUST clear cache BEFORE calling supabase.auth.signOut()
-    // The SIGNED_OUT event fires ~immediately after signOut() is called.
-    // If we clear cache after, there's a race where the listener sees the
-    // cache and thinks it's an offline scenario — keeping the user logged in.
-    await authService.setCachedProfile(null)
-    await authService.signOut()
-    set({ user: null, isAuthenticated: false })
+    const userId = useAuthStore.getState().user?.id
+    resetUserScopedMemory()
+    set({ user: null, isAuthenticated: false, isOfflineMode: false, isLoading: false })
+    if (userId) await authService.clearCachedProfile(userId)
+    try {
+      await authService.signOut()
+    } catch (error) {
+      logger.warn('[Auth] Sign-out cleanup failed:', error)
+    }
   },
 
-  setUser: (user) => set({ user, isAuthenticated: !!user }),
+  setUser: (user) => set({ user, isAuthenticated: !!user, isOfflineMode: false }),
 }))

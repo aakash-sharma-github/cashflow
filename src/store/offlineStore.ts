@@ -10,6 +10,7 @@ import { create } from "zustand";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import { logger } from "@/utils/logger";
+import { compactOfflineQueue } from "@/services/offlineQueue";
 
 export type OperationType =
   | "CREATE_BOOK"
@@ -23,8 +24,11 @@ export interface PendingOperation {
   id: string;
   type: OperationType;
   payload: Record<string, any>;
+  /** Absent only on operations written by older app versions. */
+  userId?: string;
   createdAt: string;
   retries: number;
+  lastError?: string;
 }
 
 const QUEUE_KEY = "cashflow:offline_queue";
@@ -40,12 +44,12 @@ interface OfflineState {
   loadQueue: () => Promise<void>;
   enqueue: (
     op: Omit<PendingOperation, "createdAt" | "retries">,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   dequeue: (id: string) => Promise<void>;
   syncQueue: (
     syncFn: (
       ops: PendingOperation[],
-    ) => Promise<{ succeeded: string[]; failed: string[] }>,
+    ) => Promise<{ succeeded: string[]; failed: string[]; errors?: Record<string, string> }>,
   ) => Promise<void>;
   clearQueue: () => Promise<void>;
   clearSyncError: () => void;
@@ -85,8 +89,10 @@ export const useOfflineStore = create<OfflineState>((set, get) => ({
     try {
       const raw = await AsyncStorage.getItem(QUEUE_KEY);
       if (raw) {
-        const queue: PendingOperation[] = JSON.parse(raw);
+        const loaded: PendingOperation[] = JSON.parse(raw);
+        const queue = compactOfflineQueue(loaded);
         set({ pendingQueue: queue });
+        if (JSON.stringify(queue) !== JSON.stringify(loaded)) await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
         logger.info(
           "[Offline] Loaded",
           queue.length,
@@ -104,13 +110,16 @@ export const useOfflineStore = create<OfflineState>((set, get) => ({
       createdAt: new Date().toISOString(),
       retries: 0,
     };
-    const next = [...get().pendingQueue, newOp];
-    set({ pendingQueue: next });
+    const next = compactOfflineQueue([...get().pendingQueue, newOp]);
     try {
       await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(next));
+      set({ pendingQueue: next });
       logger.info("[Offline] Queued:", op.type, "queue size:", next.length);
+      return true;
     } catch (e) {
       logger.error("[Offline] Failed to persist queue:", e);
+      set({ syncError: "Could not save the pending change on this device" });
+      return false;
     }
   },
 
@@ -136,20 +145,27 @@ export const useOfflineStore = create<OfflineState>((set, get) => ({
     );
     try {
       const ops = [...get().pendingQueue];
-      const { succeeded, failed } = await syncFn(ops);
+      const { succeeded, failed, errors = {} } = await syncFn(ops);
 
-      const remaining = get().pendingQueue.filter(
-        (op) => !succeeded.includes(op.id),
+      // Don't drop a queued edit that was compacted into the same operation
+      // while its earlier snapshot was being sent.
+      const sentPayloads = new Map(ops.map(op => [op.id, JSON.stringify(op.payload)]));
+      const succeededSet = new Set(succeeded);
+      const remaining = get().pendingQueue.filter(op =>
+        !succeededSet.has(op.id) || JSON.stringify(op.payload) !== sentPayloads.get(op.id),
       );
+      const remainingWithErrors = remaining.map(op => failed.includes(op.id)
+        ? { ...op, retries: op.retries + 1, lastError: errors[op.id] ?? 'Sync failed' }
+        : op)
       set({
-        pendingQueue: remaining,
+        pendingQueue: remainingWithErrors,
         lastSyncAt: new Date().toISOString(),
         syncError:
           failed.length > 0
             ? `${failed.length} operation${failed.length > 1 ? "s" : ""} failed to sync`
             : null,
       });
-      await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(remaining));
+      await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(remainingWithErrors));
       logger.info(
         "[Offline] Sync complete — succeeded:",
         succeeded.length,

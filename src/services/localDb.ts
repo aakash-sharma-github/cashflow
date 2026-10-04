@@ -88,6 +88,25 @@ export const localEntriesDb = {
   },
 };
 
+export type CachedBookSummary = {
+  balance: string;
+  cash_in: string;
+  cash_out: string;
+  entry_count: number;
+};
+
+export const localBookSummaryDb = {
+  async get(userId: string, bookId: string): Promise<CachedBookSummary | null> {
+    try {
+      const raw = await AsyncStorage.getItem(key(`summary:${bookId}`, userId));
+      return raw ? JSON.parse(raw) as CachedBookSummary : null;
+    } catch { return null; }
+  },
+  async save(userId: string, bookId: string, summary: CachedBookSummary): Promise<void> {
+    await AsyncStorage.setItem(key(`summary:${bookId}`, userId), JSON.stringify(summary));
+  },
+};
+
 // ─── Metadata ─────────────────────────────────────────────────
 
 export const localMetaDb = {

@@ -25,6 +25,8 @@ export interface Book {
   cash_in?: number | string
   cash_out?: number | string
   role?: MemberRole
+  /** Present only while this locally created book is waiting to sync. */
+  pending_sync?: boolean
 }
 
 export type MemberRole = 'owner' | 'member'
@@ -51,6 +53,10 @@ export interface Entry {
   entry_date: string
   created_at: string
   updated_at: string
+  /** Local-only metadata; omitted from all Supabase writes. */
+  sync_status?: 'pending' | 'synced' | 'cached' | 'needs_reconciliation'
+  /** Stable client UUID used to match a pending local row to its server row. */
+  sync_id?: string
   // Joined
   profile?: Pick<Profile, 'id' | 'email' | 'full_name'>
 }

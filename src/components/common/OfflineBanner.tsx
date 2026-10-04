@@ -12,11 +12,13 @@ import { View, Text, StyleSheet, Animated, TouchableOpacity } from 'react-native
 import { Ionicons } from '@expo/vector-icons'
 import { useOfflineStore } from '../../store/offlineStore'
 import { useOfflineSync } from '../../hooks/useOfflineSync'
+import { useAuthStore } from '../../store/authStore'
 import { FONT_SIZE, SPACING } from '../../constants'
 
 export default function OfflineBanner() {
   const { isOnline, pendingQueue, isSyncing, syncError, clearSyncError } = useOfflineStore()
-  const { runSync } = useOfflineSync()
+  const { runSync } = useOfflineSync(false)
+  const isOfflineMode = useAuthStore(s => s.isOfflineMode)
 
   const anim = useRef(new Animated.Value(-48)).current
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -25,7 +27,7 @@ export default function OfflineBanner() {
   // Show / hide logic
   const hasError = !!syncError
   const hasPending = pendingQueue.length > 0
-  const shouldShow = !isOnline || isSyncing || hasError || hasPending
+  const shouldShow = isOfflineMode || !isOnline || isSyncing || hasError || hasPending
 
   useEffect(() => {
     // Clear any existing auto-hide timer
@@ -63,7 +65,11 @@ export default function OfflineBanner() {
   let msg: string
   let tappable = false
 
-  if (!isOnline) {
+  if (isOfflineMode) {
+    bgColor = '#B45309'
+    icon = 'person-circle-outline'
+    msg = 'Local-only session · sign in to sync changes'
+  } else if (!isOnline) {
     bgColor = '#EF4444'
     icon = 'cloud-offline-outline'
     msg = pendingQueue.length > 0

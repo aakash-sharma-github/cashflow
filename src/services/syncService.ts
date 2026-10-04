@@ -26,24 +26,15 @@ export const syncService = {
     ops: PendingOperation[],
     userId: string,
   ): Promise<SyncResult> {
-    // ── Sort: CREATE_BOOK must always run before CREATE_ENTRY ──
-    // When a book and its entries are both created offline, the book
-    // gets a temp ID (local_xxx). All entry ops store book_id = local_xxx.
-    // After CREATE_BOOK syncs, we patch the real UUID into the entry ops
-    // in-place. The sort ensures this patching happens before any entry runs.
-    const ORDER: Record<string, number> = {
-      CREATE_BOOK: 0,
-      UPDATE_BOOK: 1,
-      DELETE_BOOK: 2,
-      CREATE_ENTRY: 3,
-      UPDATE_ENTRY: 4,
-      DELETE_ENTRY: 5,
-    };
-    ops.sort((a, b) => (ORDER[a.type] ?? 9) - (ORDER[b.type] ?? 9));
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user || user.id !== userId) {
+      const message = "A valid Supabase session for this account is required before syncing";
+      return { succeeded: [], failed: ops.map(op => op.id), errors: Object.fromEntries(ops.map(op => [op.id, message])) };
+    }
 
-    // allOps is in scope for the entire loop — CREATE_BOOK mutates
-    // payload.book_id on sibling ops so later iterations see the real UUID
-    const allOps = ops;
+    // Queue compaction preserves user order and removes canceled dependencies.
+    // Never globally sort by operation type: deletes must remain after creates.
+    const allOps = [...ops];
 
     const succeeded: string[] = [];
     const failed: string[] = [];
@@ -53,58 +44,64 @@ export const syncService = {
       const { type, payload } = op;
       logger.info(`[Sync] Processing ${type} (${op.id})`);
 
+      // Never replay one account's pending financial changes under another
+      // account's session. Legacy queue items have no owner marker and must
+      // be migrated/claimed explicitly instead of guessed from auth timing.
+      if (op.userId !== userId) {
+        failed.push(op.id);
+        errors[op.id] = op.userId
+          ? "Queued change belongs to a different account"
+          : "Queued change predates account scoping; verify its owner before syncing";
+        continue;
+      }
+
       try {
         switch (type) {
           // ── CREATE_BOOK ──────────────────────────────────────────
           case "CREATE_BOOK": {
             const { tempId, ...bookData } = payload;
-
-            const { data, error } = await supabase.rpc("create_book", {
-              p_name: bookData.name,
-              p_description: bookData.description || null,
-              p_color: bookData.color || "#6366F1",
-              p_currency: bookData.currency || "INR",
-            });
+            const serverId = bookData.serverId ?? bookData.bookId;
+            const { serverId: _serverId, bookId: _bookId, attemptedOnline: _attemptedOnline, ...fields } = bookData;
+            const { data, error } = serverId
+              ? await supabase.rpc("sync_create_book", {
+                  p_book_id: serverId,
+                  p_name: fields.name,
+                  p_description: fields.description || null,
+                  p_color: fields.color || "#6366F1",
+                  p_currency: fields.currency || "INR",
+                })
+              : await supabase.rpc("create_book", {
+                  p_name: fields.name,
+                  p_description: fields.description || null,
+                  p_color: fields.color || "#6366F1",
+                  p_currency: fields.currency || "INR",
+                });
 
             if (error) {
-              // 23505 = unique_violation — book already created (previous sync partially succeeded)
-              if (error.code === "23505") {
-                logger.warn(
-                  "[Sync] CREATE_BOOK duplicate — treating as success",
-                );
-                break;
-              }
               throw new Error(error.message);
             }
 
-            if (tempId && data) {
+            if (data) {
               const realId = (data as any).id as string;
 
-              // Update local book cache: replace temp ID with real server ID
+              // Replace a legacy temporary ID; current queue entries already
+              // use the stable server UUID as their book ID.
               const books = await localBooksDb.getAll(userId);
               const updatedBooks = books.map((b) =>
                 b.id === tempId
-                  ? { ...b, ...(data as any), role: "owner" as const }
+                  ? { ...b, ...(data as any), id: realId, role: "owner" as const, pending_sync: false }
+                  : b.id === realId
+                  ? { ...b, ...(data as any), role: "owner" as const, pending_sync: false }
                   : b,
               );
               await localBooksDb.save(userId, updatedBooks);
 
-              // ─── PATCH SIBLING OPS ─────────────────────────────
-              // Walk ALL pending ops and replace any book_id or entryId
-              // that still references the temp book ID with the real UUID.
-              // This is the critical fix — allOps is directly in scope here.
-              let patched = 0;
-              for (const siblingOp of allOps) {
-                if (siblingOp.id === op.id) continue; // skip self
-                if (siblingOp.payload.book_id === tempId) {
-                  siblingOp.payload.book_id = realId;
-                  patched++;
+              if (tempId) {
+                for (const siblingOp of allOps) {
+                  if (siblingOp.id === op.id) continue;
+                  if (siblingOp.payload.book_id === tempId) siblingOp.payload.book_id = realId;
+                  if (siblingOp.payload.bookId === tempId) siblingOp.payload.bookId = realId;
                 }
-              }
-              if (patched > 0) {
-                logger.info(
-                  `[Sync] Patched book_id ${tempId} → ${realId} in ${patched} sibling op(s)`,
-                );
               }
             }
             break;
@@ -112,28 +109,35 @@ export const syncService = {
 
           // ── UPDATE_BOOK ──────────────────────────────────────────
           case "UPDATE_BOOK": {
-            const { bookId, ...updates } = payload;
-            const { error } = await supabase
+            const { bookId, book_id, ...updates } = payload;
+            const targetId = bookId ?? book_id;
+            const { data, error } = await supabase
               .from("books")
               .update(updates)
-              .eq("id", bookId);
+              .eq("id", targetId)
+              .select("id")
+              .maybeSingle();
             if (error) throw new Error(error.message);
+            if (!data) throw new Error("Book update was not applied (book unavailable or not authorized)");
             break;
           }
 
           // ── DELETE_BOOK ──────────────────────────────────────────
           case "DELETE_BOOK": {
-            const { error } = await supabase
-              .from("books")
-              .delete()
-              .eq("id", payload.bookId);
+            const bookId = payload.bookId ?? payload.book_id;
+            const { error } = await supabase.rpc("sync_delete_book", { p_book_id: bookId });
             if (error) throw new Error(error.message);
+            await localBooksDb.remove(userId, bookId);
+            await localEntriesDb.clearBook(userId, bookId);
             break;
           }
 
           // ── CREATE_ENTRY ─────────────────────────────────────────
           case "CREATE_ENTRY": {
             const { tempId, ...entryData } = payload;
+            const serverId = entryData.serverId;
+            delete entryData.serverId;
+            delete entryData.attemptedOnline;
             const amount = normalizeEntryAmount(entryData.amount);
             if (!amount || !["cash_in", "cash_out"].includes(entryData.type)) {
               throw new Error("Queued entry has an invalid amount or type");
@@ -153,32 +157,34 @@ export const syncService = {
               throw new Error("Book not yet synced — will retry");
             }
 
-            const { data, error } = await supabase
+            const insertResult = await supabase
               .from("entries")
-              .insert({ ...entryData, amount, user_id: userId })
+              .insert({ ...entryData, ...(serverId ? { id: serverId } : {}), amount, user_id: userId })
               .select("*, profile:profiles(id, email, full_name)")
               .single();
+            let data = insertResult.data;
+            const error = insertResult.error;
 
             if (error) {
-              // Duplicate — already created in a previous sync attempt
-              if (error.code === "23505") {
-                logger.warn(
-                  "[Sync] CREATE_ENTRY duplicate — treating as success",
-                );
-                if (tempId && entryData.book_id) {
-                  const cached = await localEntriesDb.getByBook(
-                    userId,
-                    entryData.book_id,
-                  );
-                  await localEntriesDb.save(
-                    userId,
-                    entryData.book_id,
-                    cached.filter((e) => e.id !== tempId),
-                  );
-                }
-                break;
-              }
-              throw new Error(error.message);
+              if (error.code !== "23505" || !serverId) throw new Error(error.message);
+              const existing = await supabase
+                .from("entries")
+                .select("*, profile:profiles(id, email, full_name)")
+                .eq("id", serverId)
+                .eq("book_id", entryData.book_id)
+                .eq("user_id", userId)
+                .maybeSingle();
+              if (existing.error || !existing.data) throw new Error(existing.error?.message ?? "Duplicate entry could not be verified");
+              const refreshed = await supabase
+                .from("entries")
+                .update({ amount, type: entryData.type, note: entryData.note, entry_date: entryData.entry_date })
+                .eq("id", serverId)
+                .eq("book_id", entryData.book_id)
+                .eq("user_id", userId)
+                .select("*, profile:profiles(id, email, full_name)")
+                .single();
+              if (refreshed.error || !refreshed.data) throw new Error(refreshed.error?.message ?? "Replayed entry update was not applied");
+              data = refreshed.data;
             }
 
             // Replace temp entry with server-confirmed entry in local cache
@@ -214,7 +220,8 @@ export const syncService = {
 
           // ── UPDATE_ENTRY ─────────────────────────────────────────
           case "UPDATE_ENTRY": {
-            const { entryId, book_id: _bookId, ...updates } = payload;
+            const { entryId, entry_id, bookId: _bookId, book_id: _book_id, ...updates } = payload;
+            const targetId = entryId ?? entry_id;
             if (updates.amount !== undefined) {
               const amount = normalizeEntryAmount(updates.amount);
               if (!amount) throw new Error("Queued update has an invalid amount");
@@ -222,25 +229,30 @@ export const syncService = {
             }
 
             // Still a temp ID = CREATE_ENTRY failed before this in same sync
-            if (typeof entryId === "string" && entryId.startsWith("local_")) {
-              logger.warn("[Sync] UPDATE_ENTRY: entryId still temp —", entryId);
+            if (typeof targetId === "string" && targetId.startsWith("local_")) {
+              logger.warn("[Sync] UPDATE_ENTRY: entryId still temp —", targetId);
               throw new Error("Entry not yet synced — will retry");
             }
 
-            const { error } = await supabase
+            const { data, error } = await supabase
               .from("entries")
               .update(updates)
-              .eq("id", entryId);
+              .eq("id", targetId)
+              .select("id")
+              .maybeSingle();
             if (error) throw new Error(error.message);
+            if (!data) throw new Error("Entry update was not applied (entry unavailable or not authorized)");
             break;
           }
 
           // ── DELETE_ENTRY ─────────────────────────────────────────
           case "DELETE_ENTRY": {
-            const { entryId, book_id: bookId } = payload;
+            const { entryId, entry_id, book_id } = payload;
+            const targetId = entryId ?? entry_id;
+            const bookId = payload.bookId ?? book_id;
 
             // If still a temp ID, the entry never reached the server
-            if (typeof entryId === "string" && entryId.startsWith("local_")) {
+            if (typeof targetId === "string" && targetId.startsWith("local_")) {
               logger.info(
                 "[Sync] DELETE_ENTRY: temp entry never on server — removing from cache only",
               );
@@ -249,17 +261,18 @@ export const syncService = {
                 await localEntriesDb.save(
                   userId,
                   bookId,
-                  cached.filter((e) => e.id !== entryId),
+                cached.filter((e) => e.id !== targetId),
                 );
               }
               break; // treat as success
             }
 
-            const { error } = await supabase
-              .from("entries")
-              .delete()
-              .eq("id", entryId);
+            const { data: deleted, error } = await supabase.rpc("sync_delete_entry", {
+              p_entry_id: targetId,
+              p_book_id: bookId,
+            });
             if (error) throw new Error(error.message);
+            if (deleted !== true) throw new Error("Entry delete was not confirmed by the server");
             break;
           }
 

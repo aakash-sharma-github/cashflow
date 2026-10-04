@@ -202,6 +202,8 @@ export default function BookDetailScreen({ route, navigation }: any) {
     isLoadingMore,
     filter,
     summary,
+    summarySource,
+    reconciliation,
     hasMore,
     fetchEntries,
     loadMore,
@@ -587,7 +589,43 @@ export default function BookDetailScreen({ route, navigation }: any) {
             </Text>
           </View>
         </View>
+        <Text style={[s.dataTrustLabel, { color: summarySource === 'server' ? COLORS.cashIn : theme.textTertiary }]}>
+          {summarySource === 'server' ? 'Server confirmed' : summarySource === 'optimistic' ? 'Includes unsynced changes' : 'Cached totals'}
+        </Text>
       </View>
+
+      {reconciliation && (
+        <View
+          accessibilityLiveRegion="polite"
+          style={[s.reconciliationCard, { backgroundColor: theme.surface, borderColor: theme.border }]}
+        >
+          <Ionicons name="alert-circle-outline" size={19} color={COLORS.cashOut} />
+          <View style={s.reconciliationTextWrap}>
+            <Text style={[s.reconciliationTitle, { color: theme.text }]}>
+              {reconciliation.status === 'authorization'
+                ? 'Cached entries could not be verified'
+                : reconciliation.status === 'pending_local'
+                  ? 'Local entries are waiting to sync'
+                  : reconciliation.status === 'incomplete_response'
+                    ? 'Server list is incomplete'
+                    : reconciliation.status === 'wrong_cache_context'
+                      ? 'Cached data context mismatch'
+                      : 'Cached entries need review'}
+            </Text>
+            <Text style={[s.reconciliationBody, { color: theme.textSecondary }]}>
+              {reconciliation.status === 'authorization'
+                ? 'Access to this book could not be confirmed. Cached data has been kept.'
+                : reconciliation.status === 'pending_local'
+                  ? `${reconciliation.pendingCount} local entr${reconciliation.pendingCount === 1 ? 'y is' : 'ies are'} pending synchronization.`
+                  : reconciliation.status === 'incomplete_response'
+                    ? `The server summary has ${reconciliation.serverCount} entries but the list response was empty. Cached rows are kept while access or pagination is checked.`
+                    : reconciliation.status === 'wrong_cache_context'
+                      ? 'Cached rows do not match this user or book context. They are isolated and kept for review.'
+                      : `${reconciliation.localCount - reconciliation.pendingCount} cached entr${reconciliation.localCount - reconciliation.pendingCount === 1 ? 'y is' : 'ies are'} not present in the current server response. The local copy is kept for review.`}
+            </Text>
+          </View>
+        </View>
+      )}
 
       {/* Filter card */}
       <View style={[s.filterCard, { backgroundColor: theme.surface }]}>
@@ -618,7 +656,7 @@ export default function BookDetailScreen({ route, navigation }: any) {
           </TouchableOpacity>
         ))}
         <Text style={[s.entryCount, { color: theme.textTertiary }]}>
-          {entries.length} entries
+          {reconciliation ? `${reconciliation.localCount} cached` : filter === 'all' ? `${summary?.entry_count ?? entries.length} entries` : `${entries.length} shown`}
         </Text>
       </View>
 
@@ -970,6 +1008,20 @@ const s = StyleSheet.create({
   },
   balanceSubLabel: { fontSize: FONT_SIZE.xs, marginBottom: 2 },
   balanceSubVal: { fontSize: FONT_SIZE.md, fontWeight: "700" },
+  dataTrustLabel: { fontSize: FONT_SIZE.xs, marginTop: SPACING.sm, textAlign: 'right' },
+  reconciliationCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: SPACING.sm,
+    marginHorizontal: SPACING.lg,
+    marginBottom: SPACING.sm,
+    padding: SPACING.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: BORDER_RADIUS.md,
+  },
+  reconciliationTextWrap: { flex: 1 },
+  reconciliationTitle: { fontSize: FONT_SIZE.sm, fontWeight: '700', marginBottom: 3 },
+  reconciliationBody: { fontSize: FONT_SIZE.xs, lineHeight: 17 },
 
   filterCard: {
     flexDirection: "row",

@@ -31,48 +31,48 @@ import { normalizeEntryAmount } from '../utils/money'
 const CACHE_V = 'v2'
 
 // Display cache — page-0 only, 30 entries max
-const displayCacheKey = (b: string) => `cashflow:entries_display:${CACHE_V}:${b}`
+const displayCacheKey = (u: string, b: string) => `cashflow:entries_display:${CACHE_V}:${u}:${b}`
 
 // Full export cache — all entries
-const fullCacheKey = (b: string) => `cashflow:entries_full:${CACHE_V}:${b}`
-const fullCacheMetaKey = (b: string) => `cashflow:entries_full_meta:${CACHE_V}:${b}`
+const fullCacheKey = (u: string, b: string) => `cashflow:entries_full:${CACHE_V}:${u}:${b}`
+const fullCacheMetaKey = (u: string, b: string) => `cashflow:entries_full_meta:${CACHE_V}:${u}:${b}`
 const FULL_CACHE_TTL_MS = 5 * 60 * 1000  // 5 minutes
 
-async function readDisplayCache(bookId: string): Promise<Entry[]> {
+async function readDisplayCache(userId: string, bookId: string): Promise<Entry[]> {
   try {
-    const raw = await AsyncStorage.getItem(displayCacheKey(bookId))
+    const raw = await AsyncStorage.getItem(displayCacheKey(userId, bookId))
     return raw ? JSON.parse(raw) : []
   } catch { return [] }
 }
 
-async function writeDisplayCache(bookId: string, entries: Entry[]): Promise<void> {
-  try { await AsyncStorage.setItem(displayCacheKey(bookId), JSON.stringify(entries)) } catch { }
+async function writeDisplayCache(userId: string, bookId: string, entries: Entry[]): Promise<void> {
+  try { await AsyncStorage.setItem(displayCacheKey(userId, bookId), JSON.stringify(entries)) } catch { }
 }
 
-async function readFullCache(bookId: string): Promise<Entry[]> {
+async function readFullCache(userId: string, bookId: string): Promise<Entry[]> {
   try {
-    const raw = await AsyncStorage.getItem(fullCacheKey(bookId))
+    const raw = await AsyncStorage.getItem(fullCacheKey(userId, bookId))
     return raw ? JSON.parse(raw) : []
   } catch { return [] }
 }
 
-async function writeFullCache(bookId: string, entries: Entry[]): Promise<void> {
+async function writeFullCache(userId: string, bookId: string, entries: Entry[]): Promise<void> {
   try {
-    await AsyncStorage.setItem(fullCacheKey(bookId), JSON.stringify(entries))
-    await AsyncStorage.setItem(fullCacheMetaKey(bookId), JSON.stringify({ updatedAt: Date.now() }))
+    await AsyncStorage.setItem(fullCacheKey(userId, bookId), JSON.stringify(entries))
+    await AsyncStorage.setItem(fullCacheMetaKey(userId, bookId), JSON.stringify({ updatedAt: Date.now() }))
   } catch { }
 }
 
-async function isFullCacheStale(bookId: string): Promise<boolean> {
+async function isFullCacheStale(userId: string, bookId: string): Promise<boolean> {
   try {
-    const raw = await AsyncStorage.getItem(fullCacheMetaKey(bookId))
+    const raw = await AsyncStorage.getItem(fullCacheMetaKey(userId, bookId))
     if (!raw) return true
     return (Date.now() - (JSON.parse(raw).updatedAt ?? 0)) > FULL_CACHE_TTL_MS
   } catch { return true }
 }
 
-async function invalidateCache(bookId: string): Promise<void> {
-  try { await AsyncStorage.removeItem(fullCacheMetaKey(bookId)) } catch { }
+async function invalidateCache(userId: string, bookId: string): Promise<void> {
+  try { await AsyncStorage.removeItem(fullCacheMetaKey(userId, bookId)) } catch { }
 }
 
 // ─── Service ──────────────────────────────────────────────────
@@ -85,8 +85,13 @@ export const entriesService = {
   async getEntries(
     bookId: string,
     filter: EntryFilter = 'all',
-    page = 0
+    page = 0,
+    expectedUserId?: string,
   ): Promise<ApiResponse<Entry[]>> {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { data: null, error: 'Not authenticated' }
+    if (expectedUserId && user.id !== expectedUserId) return { data: null, error: 'Authenticated account changed before entries loaded' }
+
     let query = supabase
       .from('entries')
       .select(`*, profile:profiles(id, email, full_name)`)
@@ -105,9 +110,9 @@ export const entriesService = {
     // Write page-0 to DISPLAY cache only — keeps latest entries available offline
     // Does NOT write to the full/export cache to avoid the 30-entry export bug
     if (page === 0 && filter === 'all' && data) {
-      const existing = await readDisplayCache(bookId)
+      const existing = await readDisplayCache(user.id, bookId)
       const tempEntries = existing.filter(e => e.id.startsWith('local_'))
-      await writeDisplayCache(bookId, [...tempEntries, ...data])
+      await writeDisplayCache(user.id, bookId, [...tempEntries, ...data])
     }
 
     return { data: data ?? [], error: null }
@@ -122,8 +127,10 @@ export const entriesService = {
     bookId: string,
     filter: EntryFilter = 'all'
   ): Promise<ApiResponse<Entry[]>> {
-    const stale = await isFullCacheStale(bookId)
-    const cached = await readFullCache(bookId)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { data: null, error: 'Not authenticated' }
+    const stale = await isFullCacheStale(user.id, bookId)
+    const cached = await readFullCache(user.id, bookId)
 
     if (!stale && cached.length > 0) {
       // Cache is fresh — apply filter and return immediately
@@ -147,7 +154,7 @@ export const entriesService = {
       const { data, error } = await q
       if (error) {
         // Network failure — return stale cache if available
-        const staleCached = await readFullCache(bookId)
+        const staleCached = await readFullCache(user.id, bookId)
         if (staleCached.length > 0) {
           const filtered = filter === 'all' ? staleCached : staleCached.filter(e => e.type === filter)
           return { data: filtered, error: null }
@@ -161,14 +168,16 @@ export const entriesService = {
       if (!data || data.length < BATCH) break
 
       // Safety cap: max 10 pages × 500 = 5000 entries
-      if (++page >= 10) break
+      if (++page >= 10 && data.length === BATCH) {
+        return { data: null, error: 'Export is incomplete: more than 5,000 entries require additional pages' }
+      }
     }
 
     // Preserve any unsync'd local temp entries
     const tempEntries = cached.filter(e => e.id.startsWith('local_'))
     const final = [...tempEntries, ...allEntries]
 
-    await writeFullCache(bookId, final)
+    await writeFullCache(user.id, bookId, final)
 
     const filtered = filter === 'all' ? final : final.filter(e => e.type === filter)
     return { data: filtered, error: null }
@@ -180,7 +189,8 @@ export const entriesService = {
    */
   async createEntry(
     bookId: string,
-    formData: EntryFormData
+    formData: EntryFormData,
+    clientEntryId: string,
   ): Promise<ApiResponse<Entry>> {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { data: null, error: 'Not authenticated' }
@@ -190,6 +200,7 @@ export const entriesService = {
     const { data, error } = await supabase
       .from('entries')
       .insert({
+        id: clientEntryId,
         book_id: bookId,
         user_id: user.id,
         amount,
@@ -200,16 +211,28 @@ export const entriesService = {
       .select(`*, profile:profiles(id, email, full_name)`)
       .single()
 
-    if (error) return { data: null, error: error.message }
+    if (error) {
+      if (error.code === '23505') {
+        const existing = await supabase
+          .from('entries')
+          .select(`*, profile:profiles(id, email, full_name)`)
+          .eq('id', clientEntryId)
+          .eq('book_id', bookId)
+          .eq('user_id', user.id)
+          .maybeSingle()
+        if (existing.data) return { data: existing.data, error: null }
+      }
+      return { data: null, error: error.message }
+    }
 
     // Update display cache immediately so offline list stays current
     // Also invalidate full cache so next export re-fetches fresh data
     if (data) {
-      const display = await readDisplayCache(bookId)
+      const display = await readDisplayCache(user.id, bookId)
       const updated = [data, ...display.filter(e => e.id !== data.id)]
         .sort((a, b) => new Date(b.entry_date).getTime() - new Date(a.entry_date).getTime())
-      await writeDisplayCache(bookId, updated)
-      await invalidateCache(bookId)  // force export cache refresh
+      await writeDisplayCache(user.id, bookId, updated)
+      await invalidateCache(user.id, bookId)  // force export cache refresh
     }
 
     return { data, error: null }
@@ -262,7 +285,7 @@ export const entriesService = {
     }
 
     // Invalidate cache so next fetch gets fresh data including imported entries
-    if (inserted > 0) await invalidateCache(bookId)
+    if (inserted > 0) await invalidateCache(user.id, bookId)
 
     return { inserted, failed }
   },
@@ -274,6 +297,8 @@ export const entriesService = {
     id: string,
     formData: Partial<EntryFormData>
   ): Promise<ApiResponse<Entry>> {
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) return { data: null, error: authError?.message ?? 'Not authenticated' }
     const updates: Record<string, unknown> = {}
     if (formData.amount !== undefined) {
       const amount = normalizeEntryAmount(formData.amount)
@@ -295,10 +320,10 @@ export const entriesService = {
 
     // Update display cache in-place; invalidate full export cache
     if (data) {
-      const display = await readDisplayCache(data.book_id)
+      const display = await readDisplayCache(user.id, data.book_id)
       const idx = display.findIndex(e => e.id === id)
-      if (idx >= 0) { display[idx] = data; await writeDisplayCache(data.book_id, display) }
-      await invalidateCache(data.book_id)
+      if (idx >= 0) { display[idx] = data; await writeDisplayCache(user.id, data.book_id, display) }
+      await invalidateCache(user.id, data.book_id)
     }
 
     return { data, error: null }
@@ -308,32 +333,62 @@ export const entriesService = {
    * Delete a single entry.
    */
   async deleteEntry(id: string): Promise<ApiResponse<null>> {
-    const { error } = await supabase
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) return { data: null, error: authError?.message ?? 'Not authenticated' }
+    const { data, error } = await supabase
       .from('entries')
       .delete()
       .eq('id', id)
+      .select('id,book_id')
+      .single()
 
     if (error) return { data: null, error: error.message }
+    const display = await readDisplayCache(user.id, data.book_id)
+    await writeDisplayCache(user.id, data.book_id, display.filter(entry => entry.id !== id))
+    await invalidateCache(user.id, data.book_id)
     return { data: null, error: null }
+  },
+
+  async applyRealtimeEntry(entry: Entry, expectedUserId?: string): Promise<void> {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user || expectedUserId && user.id !== expectedUserId) return
+    const display = await readDisplayCache(user.id, entry.book_id)
+    const next = [entry, ...display.filter(item => item.id !== entry.id)]
+      .sort((a, b) => new Date(b.entry_date).getTime() - new Date(a.entry_date).getTime())
+      .slice(0, PAGE_SIZE)
+    await writeDisplayCache(user.id, entry.book_id, next)
+    await invalidateCache(user.id, entry.book_id)
+  },
+
+  async applyRealtimeDelete(bookId: string, entryId: string, expectedUserId?: string): Promise<void> {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user || expectedUserId && user.id !== expectedUserId) return
+    const display = await readDisplayCache(user.id, bookId)
+    await writeDisplayCache(user.id, bookId, display.filter(entry => entry.id !== entryId))
+    await invalidateCache(user.id, bookId)
   },
 
   /**
    * Invalidate cache for a book — call after batch deletes.
    */
   async invalidateBookCache(bookId: string): Promise<void> {
-    await invalidateCache(bookId)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) await invalidateCache(user.id, bookId)
   },
 
   /**
    * Authoritative aggregate computed in PostgreSQL, independent of PostgREST
    * row limits and entry pagination.
    */
-  async getBookSummary(bookId: string): Promise<ApiResponse<{
+  async getBookSummary(bookId: string, expectedUserId?: string): Promise<ApiResponse<{
     balance: string
     cash_in: string
     cash_out: string
     entry_count: number
   }>> {
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) return { data: null, error: authError?.message ?? 'Not authenticated' }
+    if (expectedUserId && user.id !== expectedUserId) return { data: null, error: 'Authenticated account changed before summary loaded' }
     const { data, error } = await supabase.rpc('get_book_financial_summaries_exact', {
       p_book_id: bookId,
     })

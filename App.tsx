@@ -31,6 +31,7 @@ function AppContent() {
   usePushNotifications()
 
   const isAuthenticated = useAuthStore(s => s.isAuthenticated)
+  const isOfflineMode = useAuthStore(s => s.isOfflineMode)
   const user = useAuthStore(s => s.user)
 
   useEffect(() => {
@@ -57,13 +58,13 @@ function AppContent() {
   // Load todos with the user's ID once authenticated
   // This ensures each user gets their own todo list
   useEffect(() => {
-    if (isAuthenticated && user?.id) {
+    if ((isAuthenticated || isOfflineMode) && user?.id) {
       loadTodos(user.id)
-    } else if (!isAuthenticated) {
+    } else if (!isAuthenticated && !isOfflineMode) {
       // Reset in-memory todos on logout (keeps AsyncStorage intact for next login)
       useTodoStore.getState().reset()
     }
-  }, [isAuthenticated, user?.id])
+  }, [isAuthenticated, isOfflineMode, user?.id])
 
   // isLoading drives our custom gradient splash (shown by RootNavigator)
   // The native OS splash is gone by now; React renders immediately

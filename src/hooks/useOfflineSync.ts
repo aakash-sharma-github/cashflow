@@ -14,9 +14,11 @@ import { useEntriesStore } from '../store/entriesStore'
 import { syncService } from '../services/syncService'
 import { logger } from '@/utils/logger'
 
-export function useOfflineSync() {
+export function useOfflineSync(enableLifecycle = true) {
   const { initNetworkListener, isOnline, pendingQueue, syncQueue, isSyncing } = useOfflineStore()
   const { user, isAuthenticated } = useAuthStore()
+  const isOfflineMode = useAuthStore(s => s.isOfflineMode)
+  const resolveOnlineSession = useAuthStore(s => s.resolveOnlineSession)
   const { fetchBooks } = useBooksStore()
   const { fetchEntries } = useEntriesStore()
 
@@ -24,7 +26,7 @@ export function useOfflineSync() {
   const currentBookIdRef = useRef<string | null>(null)
 
   const runSync = useCallback(async () => {
-    if (!user || !isOnline || pendingQueue.length === 0 || isSyncing) return
+    if (!isAuthenticated || !user || !isOnline || pendingQueue.length === 0 || isSyncing) return
 
     logger.info('[Sync] Running sync of', pendingQueue.length, 'queued operations')
 
@@ -39,38 +41,37 @@ export function useOfflineSync() {
     if (currentBookIdRef.current) {
       await fetchEntries(currentBookIdRef.current, true)
     }
-  }, [user, isOnline, pendingQueue.length, isSyncing, syncQueue, fetchBooks, fetchEntries])
+  }, [user, isAuthenticated, isOnline, pendingQueue.length, isSyncing, syncQueue, fetchBooks, fetchEntries])
 
   // Initialize network listener once on mount
   useEffect(() => {
+    if (!enableLifecycle) return
     const unsubscribe = initNetworkListener()
     return unsubscribe
-  }, [])
+  }, [enableLifecycle, initNetworkListener])
 
-  // Sync on mount if already online with pending items
-  // (covers the case where app was killed while offline and restarted online)
+  // Sync when auth, network, or queue hydration makes replay possible.
   useEffect(() => {
-    if (isAuthenticated && isOnline && pendingQueue.length > 0) {
+    if (enableLifecycle && isAuthenticated && isOnline && pendingQueue.length > 0) {
       runSync()
     }
-  }, [isAuthenticated]) // Only runs when auth state settles — not on every online change
+  }, [enableLifecycle, isAuthenticated, isOnline, pendingQueue.length, runSync])
 
-  // Sync when network comes back online
   useEffect(() => {
-    if (isOnline && pendingQueue.length > 0) {
-      runSync()
-    }
-  }, [isOnline]) // Runs specifically when isOnline flips true
+    if (enableLifecycle && isOnline && isOfflineMode) void resolveOnlineSession()
+  }, [enableLifecycle, isOnline, isOfflineMode, resolveOnlineSession])
 
   // Sync when app comes to foreground (catches background kills)
   useEffect(() => {
+    if (!enableLifecycle) return
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
       if (state === 'active' && isOnline && pendingQueue.length > 0) {
         runSync()
       }
+      if (state === 'active' && isOnline && isOfflineMode) void resolveOnlineSession()
     })
     return () => sub.remove()
-  }, [isOnline, pendingQueue.length, runSync])
+  }, [enableLifecycle, isOnline, isOfflineMode, pendingQueue.length, runSync, resolveOnlineSession])
 
   return {
     isOnline,

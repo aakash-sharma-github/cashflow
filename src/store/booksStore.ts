@@ -8,13 +8,11 @@ import { create } from 'zustand'
 import { booksService } from '../services/booksService'
 import { useAuthStore } from './authStore'
 import { useOfflineStore } from './offlineStore'
-import { localBooksDb } from '../services/localDb'
+import { localBooksDb, localEntriesDb } from '../services/localDb'
 import type { Book, BookFormData } from '../types'
 import { logger } from '../utils/logger'
 import { addMoney, subtractMoney } from '../utils/money'
-
-const genTempId = () =>
-  `local_${Date.now()}_${Math.random().toString(36).slice(2, 14)}`
+import { createSyncId } from '../utils/uuid'
 
 interface BooksState {
   books: Book[]
@@ -28,11 +26,15 @@ interface BooksState {
   updateBook: (id: string, formData: Partial<BookFormData>) => Promise<{ error: string | null }>
   deleteBook: (id: string) => Promise<{ error: string | null }>
   setCurrentBook: (book: Book | null) => void
+  reset: () => void
   updateBookBalance: (
     bookId: string,
     delta: { cash_in?: number | string; cash_out?: number | string },
   ) => Promise<void>
 }
+
+let booksFetchGeneration = 0
+let bookFetchGeneration = 0
 
 export const useBooksStore = create<BooksState>((set, get) => ({
   books: [],
@@ -46,9 +48,11 @@ export const useBooksStore = create<BooksState>((set, get) => ({
   fetchBooks: async () => {
     const userId = useAuthStore.getState().user?.id
     if (!userId) return
+    const generation = ++booksFetchGeneration
 
     // ── Step 1: Load cache immediately ──────────────────────────
     const cached = await localBooksDb.getAll(userId)
+    if (generation !== booksFetchGeneration || useAuthStore.getState().user?.id !== userId) return
     // Don't blank out an already-correct, already-displayed list with an
     // empty/incomplete cache read (e.g. this read racing a fresher one
     // from a moment ago) — only replace what's on screen if the cache
@@ -68,6 +72,7 @@ export const useBooksStore = create<BooksState>((set, get) => ({
 
     try {
       const { data, error } = await booksService.getBooks()
+      if (generation !== booksFetchGeneration || useAuthStore.getState().user?.id !== userId) return
       if (error || !data) {
         // Check if error is auth-related — if so, don't log as network error
         // (this is expected when Supabase client hasn't hydrated JWT yet)
@@ -79,8 +84,11 @@ export const useBooksStore = create<BooksState>((set, get) => ({
         set({ isLoading: false })
         return
       }
-      await localBooksDb.save(userId, data)
-      set({ books: data, isLoading: false, error: null })
+      const pending = get().books.filter(book => book.pending_sync && !data.some(remote => remote.id === book.id))
+      const merged = [...data, ...pending]
+      await localBooksDb.save(userId, merged)
+      if (generation !== booksFetchGeneration || useAuthStore.getState().user?.id !== userId) return
+      set({ books: merged, isLoading: false, error: null })
     } catch (e) {
       logger.warn('[Books] fetchBooks exception:', e)
       set({ isLoading: false })
@@ -90,11 +98,14 @@ export const useBooksStore = create<BooksState>((set, get) => ({
   // ── fetchBook ──────────────────────────────────────────────────
   fetchBook: async (id) => {
     const userId = useAuthStore.getState().user?.id
+    const generation = ++bookFetchGeneration
     const { isOnline } = useOfflineStore.getState()
+    if (get().currentBook?.id !== id) set({ currentBook: null })
 
     // Step 1: Serve from cache immediately
     if (userId) {
       const all = await localBooksDb.getAll(userId)
+      if (generation !== bookFetchGeneration || useAuthStore.getState().user?.id !== userId) return
       const cached = all.find(b => b.id === id)
       if (cached) set({ currentBook: cached })
     }
@@ -104,6 +115,7 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     // Step 2: Background refresh
     try {
       const { data } = await booksService.getBook(id)
+      if (generation !== bookFetchGeneration || useAuthStore.getState().user?.id !== userId) return
       if (data) {
         set({ currentBook: data })
         // Also update the book in the list
@@ -117,13 +129,15 @@ export const useBooksStore = create<BooksState>((set, get) => ({
 
   // ── createBook ─────────────────────────────────────────────────
   createBook: async (formData) => {
-    const userId = useAuthStore.getState().user?.id!
+    const userId = useAuthStore.getState().user?.id
+    if (!userId) return { data: null, error: 'Not authenticated' }
     const { isOnline, enqueue } = useOfflineStore.getState()
-    const id = genTempId()
+    const serverId = createSyncId()
+    const localId = serverId
     const now = new Date().toISOString()
 
     const optimistic: Book = {
-      id,
+      id: localId,
       name: formData.name.trim(),
       description: formData.description?.trim() || null,
       color: formData.color,
@@ -136,6 +150,7 @@ export const useBooksStore = create<BooksState>((set, get) => ({
       cash_in: 0,
       cash_out: 0,
       member_count: 1,
+      pending_sync: true,
     }
 
     // Optimistic UI — show immediately
@@ -143,29 +158,39 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     await localBooksDb.upsert(userId, optimistic)
 
     if (!isOnline) {
-      await enqueue({ id: `op_${id}`, type: 'CREATE_BOOK', payload: { tempId: id, ...formData } })
+      const queued = await enqueue({ id: `create-book:${serverId}`, type: 'CREATE_BOOK', userId, payload: { bookId: serverId, serverId, ...formData } })
+      if (!queued) {
+        set(state => ({ books: state.books.filter(book => book.id !== serverId) }))
+        await localBooksDb.remove(userId, serverId)
+        return { data: null, error: 'Could not save this book to the offline queue' }
+      }
       return { data: optimistic, error: null }
     }
 
-    const { data, error } = await booksService.createBook(formData)
+    const { data, error } = await booksService.createBook(formData, serverId)
     if (error || !data) {
       // Online but request failed — queue for retry
-      await enqueue({ id: `op_${id}`, type: 'CREATE_BOOK', payload: { tempId: id, ...formData } })
+      const queued = await enqueue({ id: `create-book:${serverId}`, type: 'CREATE_BOOK', userId, payload: { bookId: serverId, serverId, attemptedOnline: true, ...formData } })
+      if (!queued) {
+        set(state => ({ books: state.books.filter(book => book.id !== serverId) }))
+        await localBooksDb.remove(userId, serverId)
+        return { data: null, error: `${error ?? 'Book creation failed'}. Pending save could not be stored on this device.` }
+      }
       return { data: optimistic, error: null }
     }
 
-    // Replace optimistic with real server data
-    const real = { ...data, role: 'owner' as const }
-    set(state => ({ books: state.books.map(b => b.id === id ? real : b) }))
+    const real = { ...data, role: 'owner' as const, pending_sync: false }
+    set(state => ({ books: state.books.map(b => b.id === localId ? real : b) }))
     await localBooksDb.upsert(userId, real)
-    await localBooksDb.remove(userId, id)
     return { data: real, error: null }
   },
 
   // ── updateBook ─────────────────────────────────────────────────
   updateBook: async (id, formData) => {
-    const userId = useAuthStore.getState().user?.id!
+    const userId = useAuthStore.getState().user?.id
+    if (!userId) return { error: 'Not authenticated' }
     const { isOnline, enqueue } = useOfflineStore.getState()
+    const previous = get().books.find(book => book.id === id)
 
     // Optimistic update
     set(state => ({
@@ -178,39 +203,76 @@ export const useBooksStore = create<BooksState>((set, get) => ({
     }
 
     if (!isOnline) {
-      await enqueue({ id: `op_upd_${id}_${Date.now()}`, type: 'UPDATE_BOOK', payload: { bookId: id, ...formData } })
+      const queued = await enqueue({ id: `op_upd_${id}_${Date.now()}`, type: 'UPDATE_BOOK', userId, payload: { bookId: id, ...formData } })
+      if (!queued && previous) {
+        set(state => ({ books: state.books.map(book => book.id === id ? previous : book), currentBook: state.currentBook?.id === id ? previous : state.currentBook }))
+        await localBooksDb.upsert(userId, previous)
+        return { error: 'Could not save this update to the offline queue' }
+      }
       return { error: null }
     }
 
     const { error } = await booksService.updateBook(id, formData)
     if (error) {
-      await enqueue({ id: `op_upd_${id}_${Date.now()}`, type: 'UPDATE_BOOK', payload: { bookId: id, ...formData } })
+      const queued = await enqueue({ id: `op_upd_${id}_${Date.now()}`, type: 'UPDATE_BOOK', userId, payload: { bookId: id, ...formData } })
+      if (!queued) {
+        if (previous) {
+          set(state => ({ books: state.books.map(book => book.id === id ? previous : book), currentBook: state.currentBook?.id === id ? previous : state.currentBook }))
+          await localBooksDb.upsert(userId, previous)
+        }
+        return { error: `${error}. Pending update could not be stored on this device.` }
+      }
     }
     return { error: null }
   },
 
   // ── deleteBook ─────────────────────────────────────────────────
   deleteBook: async (id) => {
-    const userId = useAuthStore.getState().user?.id!
+    const userId = useAuthStore.getState().user?.id
+    if (!userId) return { error: 'Not authenticated' }
     const { isOnline, enqueue } = useOfflineStore.getState()
+    const previous = get().books.find(book => book.id === id) ?? (get().currentBook?.id === id ? get().currentBook : null)
 
     // Optimistic remove
     set(state => ({ books: state.books.filter(b => b.id !== id) }))
-    if (userId) await localBooksDb.remove(userId, id)
+    if (userId) {
+      await localBooksDb.remove(userId, id)
+    }
 
     if (!isOnline) {
-      await enqueue({ id: `op_del_${id}`, type: 'DELETE_BOOK', payload: { bookId: id } })
+      const queued = await enqueue({ id: `op_del_${id}`, type: 'DELETE_BOOK', userId, payload: { bookId: id } })
+      if (!queued && previous && userId) {
+        set(state => ({ books: [previous, ...state.books], currentBook: previous.id === state.currentBook?.id ? previous : state.currentBook }))
+        await localBooksDb.upsert(userId, previous)
+        return { error: 'Could not save this delete to the offline queue' }
+      }
+      if (queued) await localEntriesDb.clearBook(userId, id)
       return { error: null }
     }
 
     const { error } = await booksService.deleteBook(id)
     if (error) {
-      await enqueue({ id: `op_del_${id}`, type: 'DELETE_BOOK', payload: { bookId: id } })
+      const queued = await enqueue({ id: `op_del_${id}`, type: 'DELETE_BOOK', userId, payload: { bookId: id } })
+      if (!queued) {
+        if (previous) {
+          set(state => ({ books: [previous, ...state.books], currentBook: state.currentBook?.id === id ? previous : state.currentBook }))
+          await localBooksDb.upsert(userId, previous)
+        }
+        return { error: `${error}. Pending delete could not be stored on this device.` }
+      }
+      await localEntriesDb.clearBook(userId, id)
+    } else {
+      await localEntriesDb.clearBook(userId, id)
     }
     return { error: null }
   },
 
   setCurrentBook: (book) => set({ currentBook: book }),
+  reset: () => {
+    booksFetchGeneration++
+    bookFetchGeneration++
+    set({ books: [], currentBook: null, isLoading: false, error: null })
+  },
 
   // ── updateBookBalance ──────────────────────────────────────────
   // Applies an incremental cash_in/cash_out delta to a single book's

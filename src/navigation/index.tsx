@@ -174,7 +174,7 @@ function AppStack() {
 }
 
 export default function RootNavigator() {
-  const { isAuthenticated, isLoading } = useAuthStore()
+  const { isAuthenticated, isOfflineMode, isLoading } = useAuthStore()
   const { mode } = useThemeStore()
   const theme = getTheme(mode)
 
@@ -207,7 +207,7 @@ export default function RootNavigator() {
 
   return (
     <NavigationContainer ref={navigationRef} theme={navTheme}>
-      {isAuthenticated ? <AppStack /> : <AuthStack />}
+      {isAuthenticated || isOfflineMode ? <AppStack /> : <AuthStack />}
     </NavigationContainer>
   )
 }
