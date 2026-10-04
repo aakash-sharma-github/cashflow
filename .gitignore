@@ -29,19 +29,12 @@ ios/
 __tests__/
 
 # Development based md files
-google-play-key.json
-production.md
-distribution.md
-rls-security-analysis.md
-final_apk
-google-services.json
+final_apk/
 supabase/.temp
-proguard-rules.pro
-github-release-notes.md
-commands.md
-cashflow-firebase.json
-oauth
-readme
+android/app/build/
+google-services.json
+oauth/
+readme/
 code_summary.yaml
 prompt.md
 
