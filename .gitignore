@@ -31,7 +31,11 @@ __tests__/
 src/services/__tests__/*
 !src/services/__tests__/entriesExport.test.ts
 !src/services/__tests__/exportMath.test.ts
+!src/services/__tests__/cacheReconciliation.test.ts
 !src/store/__tests__/
+!src/utils/
+!src/utils/__tests__/
+!src/utils/__tests__/money.test.ts
 
 # Development based md files
 final_apk/

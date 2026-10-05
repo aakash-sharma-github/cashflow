@@ -53,6 +53,7 @@ interface EntriesState {
     id: string,
     bookId: string,
   ) => Promise<{ error: string | null }>;
+  deleteAllEntries: (bookId: string) => Promise<{ error: string | null }>;
   setFilter: (filter: EntryFilter, bookId: string) => void;
   addEntryFromRealtime: (entry: Entry) => Promise<void>;
   updateEntryFromRealtime: (entry: Entry) => Promise<void>;
@@ -222,23 +223,29 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
       }
 
       // Merge: temp (offline-created) entries always show at top
+      const activeQueue = useOfflineStore.getState().pendingQueue;
+      const deleteAllPending = activeQueue.some(op => op.type === 'DELETE_BOOK_ENTRIES' &&
+        op.userId === userId && (op.payload.book_id ?? op.payload.bookId) === bookId);
       const refreshed = mergeEntriesWithPendingMutations({
         serverEntries: data,
         localEntries: allLocalEntries,
-        queue: useOfflineStore.getState().pendingQueue,
+        queue: activeQueue,
         userId,
         bookId,
       })
+      const visibleSummary = deleteAllPending
+        ? { balance: '0.00', cash_in: '0.00', cash_out: '0.00', entry_count: 0 }
+        : summary;
       if (get().filter === 'all') await localEntriesDb.save(userId, bookId, refreshed);
-      if (summary) await localBookSummaryDb.save(userId, bookId, summary)
+      if (visibleSummary) await localBookSummaryDb.save(userId, bookId, visibleSummary)
       set({
         entries: get().filter === 'all' ? refreshed : refreshed.filter(entry => entry.type === get().filter),
         isLoading: false,
         error: null,
         currentPage: 0,
-        hasMore: data.length === PAGE_SIZE,
-        ...(summary ? { summary } : {}),
-        summarySource: summary ? 'server' : 'cache',
+        hasMore: !deleteAllPending && data.length === PAGE_SIZE,
+        ...(visibleSummary ? { summary: visibleSummary } : {}),
+        summarySource: deleteAllPending ? 'optimistic' : summary ? 'server' : 'cache',
         reconciliation: null,
       });
     } catch (e) {
@@ -537,6 +544,42 @@ export const useEntriesStore = create<EntriesState>((set, get) => ({
     }
     // entries/summary were already updated optimistically above (line ~308);
     // nothing further to recompute here on success.
+    return { error: null };
+  },
+
+  deleteAllEntries: async (bookId) => {
+    const userId = useAuthStore.getState().user?.id;
+    if (!userId) return { error: "Not authenticated" };
+    if (get().loadedBookId !== bookId) return { error: "Book is not active" };
+    const { isOnline, enqueue } = useOfflineStore.getState();
+    if (!isOnline) {
+      const queued = await enqueue({
+        id: `delete-book-entries:${bookId}:${Date.now()}`,
+        type: "DELETE_BOOK_ENTRIES",
+        userId,
+        payload: { bookId },
+      });
+      if (!queued) return { error: "Could not save delete-all to the offline queue" };
+    } else {
+      const { error } = await entriesService.deleteAllEntries(bookId);
+      if (error) return { error };
+    }
+    const priorSummary = get().summary;
+    if (priorSummary) {
+      await useBooksStore.getState().updateBookBalance(bookId, {
+        cash_in: subtractMoney(0, priorSummary.cash_in),
+        cash_out: subtractMoney(0, priorSummary.cash_out),
+      });
+    }
+    await localEntriesDb.clearBook(userId, bookId);
+    await localBookSummaryDb.save(userId, bookId, { balance: '0.00', cash_in: '0.00', cash_out: '0.00', entry_count: 0 });
+    set((state) => state.loadedBookId === bookId ? {
+      entries: [], summary: { balance: '0.00', cash_in: '0.00', cash_out: '0.00', entry_count: 0 },
+      summarySource: isOnline ? 'server' : 'optimistic', reconciliation: null,
+      currentPage: 0, hasMore: false,
+    } : {});
+    if (!isOnline) await entriesService.invalidateBookCache(bookId);
+    void useBooksStore.getState().fetchBook(bookId);
     return { error: null };
   },
 

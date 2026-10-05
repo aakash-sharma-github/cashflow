@@ -18,7 +18,9 @@ export default function VerifyOtpScreen({ route, navigation }: any) {
   const { email } = route.params
   const [otp, setOtp] = useState<string[]>(Array(OTP_LENGTH).fill(''))
   const [loading, setLoading] = useState(false)
+  const [resending, setResending] = useState(false)
   const [resendTimer, setResendTimer] = useState(60)
+  const requestInFlight = useRef(false)
   const inputs = useRef<TextInput[]>([])
   const verifyOtp = useAuthStore(s => s.verifyOtp)
   const sendOtp = useAuthStore(s => s.sendOtp)
@@ -32,6 +34,7 @@ export default function VerifyOtpScreen({ route, navigation }: any) {
   }, [resendTimer])
 
   const handleChange = (value: string, index: number) => {
+    if (loading) return
     if (!/^\d*$/.test(value)) return
     const next = [...otp]
     next[index] = value.slice(-1)
@@ -45,24 +48,50 @@ export default function VerifyOtpScreen({ route, navigation }: any) {
   }
 
   const handleVerify = async (code?: string) => {
+    if (requestInFlight.current) return
     const token = code || otp.join('')
     if (token.length < OTP_LENGTH) { themedAlert('Incomplete', 'Enter the 6-digit code.'); return }
+    requestInFlight.current = true
     setLoading(true)
-    const { error } = await verifyOtp(email, token)
-    setLoading(false)
+    let error: string | null = null
+    try { ({ error } = await verifyOtp(email, token)) }
+    catch (e) { error = e instanceof Error ? e.message : 'Network request failed' }
+    finally { requestInFlight.current = false; setLoading(false) }
     if (error) {
-      themedAlert('Invalid Code', 'Code is incorrect or expired.')
+      const title = /rate.?limit|too many requests/i.test(error) ? 'Too many attempts'
+        : /expired/i.test(error) ? 'Code expired'
+        : /network|fetch|timeout|connection/i.test(error) ? 'Connection problem'
+        : /already.*used|used.*already/i.test(error) ? 'Code already used' : 'Invalid code'
+      const message = /rate.?limit|too many requests/i.test(error)
+        ? 'Supabase is temporarily limiting sign-in attempts. Wait before requesting or entering another code.'
+        : /expired/i.test(error) ? 'This code has expired. Request a new code when the resend timer ends.'
+        : /network|fetch|timeout|connection/i.test(error) ? 'Check your connection and try verifying again.'
+        : /already.*used|used.*already/i.test(error) ? 'This code was already used. Request a new one to sign in.'
+        : 'The code was not accepted. Check the digits or request a new code when available.'
+      themedAlert(title, message)
       setOtp(Array(OTP_LENGTH).fill(''))
       inputs.current[0]?.focus()
     }
   }
 
   const handleResend = async () => {
-    setResendTimer(60)
-    setOtp(Array(OTP_LENGTH).fill(''))
-    inputs.current[0]?.focus()
-    const { error } = await sendOtp(email)
-    if (error) themedAlert('Error', 'Could not resend code.')
+    if (requestInFlight.current || resendTimer > 0) return
+    requestInFlight.current = true
+    setResending(true)
+    try {
+      const { error } = await sendOtp(email)
+      if (error) {
+        const limited = /rate.?limit|too many requests/i.test(error)
+        themedAlert(limited ? 'Please wait before requesting another code' : 'Could not resend code', error)
+        if (limited) setResendTimer(60)
+        return
+      }
+      setResendTimer(60)
+      setOtp(Array(OTP_LENGTH).fill(''))
+      inputs.current[0]?.focus()
+    } catch (e) {
+      themedAlert('Could not resend code', e instanceof Error ? e.message : 'Check your connection and try again.')
+    } finally { requestInFlight.current = false; setResending(false) }
   }
 
   const filled = otp.filter(v => v !== '').length
@@ -154,8 +183,8 @@ export default function VerifyOtpScreen({ route, navigation }: any) {
             <Text style={[s.resendLabel, { color: theme.textSecondary }]}>Didn't receive it? </Text>
             {resendTimer > 0
               ? <Text style={[s.resendTimer, { color: theme.textTertiary }]}>Resend in {resendTimer}s</Text>
-              : <TouchableOpacity onPress={handleResend}>
-                <Text style={s.resendLink}>Resend code</Text>
+              : <TouchableOpacity onPress={handleResend} disabled={resending}>
+                <Text style={s.resendLink}>{resending ? 'Sending…' : 'Resend code'}</Text>
               </TouchableOpacity>
             }
           </View>

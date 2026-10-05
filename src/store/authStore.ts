@@ -11,6 +11,8 @@ import { useTodoStore } from './todoStore'
 
 let initialization: Promise<void> | null = null
 let authEventVersion = 0
+const OTP_RESEND_COOLDOWN_MS = 60_000
+const otpRequestTimes = new Map<string, number>()
 
 function resetUserScopedMemory() {
   useBooksStore.getState().reset()
@@ -155,7 +157,14 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   sendOtp: async (email) => {
-    const { error } = await authService.sendOtp(email)
+    const normalizedEmail = email.trim().toLowerCase()
+    const lastRequest = otpRequestTimes.get(normalizedEmail)
+    const remainingMs = lastRequest === undefined ? 0 : OTP_RESEND_COOLDOWN_MS - (Date.now() - lastRequest)
+    if (remainingMs > 0) {
+      return { error: `Please wait ${Math.ceil(remainingMs / 1000)} seconds before requesting another sign-in code.` }
+    }
+    const { error } = await authService.sendOtp(normalizedEmail)
+    if (!error || /rate.?limit|too many requests/i.test(error)) otpRequestTimes.set(normalizedEmail, Date.now())
     return { error: error ?? null }
   },
 

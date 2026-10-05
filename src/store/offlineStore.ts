@@ -18,7 +18,8 @@ export type OperationType =
   | "DELETE_BOOK"
   | "CREATE_ENTRY"
   | "UPDATE_ENTRY"
-  | "DELETE_ENTRY";
+  | "DELETE_ENTRY"
+  | "DELETE_BOOK_ENTRIES";
 
 export interface PendingOperation {
   id: string;

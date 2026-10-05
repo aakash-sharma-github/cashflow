@@ -2,25 +2,27 @@
 
 All notable changes to CashFlow are documented here.
 
-## [1.4.3] - 2026-10-05
+## ## [1.4.5] - 2026-10-05
 
 ### Added
 
-- Complete, paginated CSV and PDF exports with server-side count checks to detect incomplete exports.
-- Explicit export errors when the complete dataset cannot be verified or the book has unsynchronized entry changes.
-- Profile and entry-field access restrictions for collaborators and authenticated API clients.
+- Owner-authorized delete-all for book entries, including offline queue and cache reconciliation support.
+- A cooldown for repeated OTP requests and clearer feedback for rate limits, expired or invalid codes, and connection failures.
+- Regression coverage for empty-cache reconciliation, large import batching, and grouped amount formatting.
 
 ### Changed
 
-- Load the visible entry page and authoritative book summary concurrently.
-- Avoid an extra Auth user request before read-only queries; Postgres RLS remains authoritative.
-- Refresh book metadata without repeating its financial-summary query.
-- Load collaborator details across multiple books in one request.
-- Show the installed app and native build versions in Settings, and synchronize native version fields through the release bump script.
-- Reduce the Android JavaScript bundle by importing only the Ionicons font used by the app.
-- Limit default Android builds to ARM phone architectures; x86 emulator builds can override the ABI property.
+- Import entries in batches of 500 instead of 100 to reduce sequential database requests for large CSV files.
+- Format amounts with thousands separators, omit zero cents, preserve meaningful cents, and retain negative balances.
+- Show entry edit and delete actions only to the entry author or book owner.
+- Show the inviter's existing profile name or email to recipients of pending book invitations.
+- Exclude the authenticated actor from entry-change push notifications, including edits and deletes of entries created by another member.
 
 ### Security
 
-- Keep profile push tokens unavailable to ordinary client queries.
-- Revoke `TRUNCATE` privileges from public API roles and limit entry updates to editable fields, protecting entry ownership, book association, and timestamps.
+- Added RLS policies limiting entry edits and deletes to the author or book owner, plus an owner-only database function for delete-all.
+- Added profile visibility for a pending invitee only when needed to identify the inviter.
+
+### Database migration
+
+- Apply `supabase/migrations/20261005120000_collaboration_permissions_delete_all.sql` to each Supabase environment before releasing the updated client. It has not been applied to the connected project as part of this change.

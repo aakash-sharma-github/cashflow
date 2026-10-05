@@ -66,6 +66,6 @@ export function formatMoney(value: MoneyValue, currency = 'USD'): string {
   const absolute = negative ? -cents : cents
   const whole = (absolute / 100n).toLocaleString('en-US')
   const fraction = absolute % 100n
-  const decimal = fraction === 0n ? '' : fraction % 10n === 0n ? `.${fraction / 10n}` : `.${String(fraction).padStart(2, '0')}`
+  const decimal = fraction === 0n ? '' : `.${String(fraction).padStart(2, '0')}`
   return `${negative ? '-' : ''}${symbol}${whole}${decimal}`
 }

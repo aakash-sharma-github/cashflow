@@ -18,6 +18,7 @@ export function mergeEntriesWithPendingMutations(args: {
   const { serverEntries, localEntries, queue, userId, bookId } = args
   const relevant = queue.filter(op => op.userId === userId &&
     (op.payload.book_id ?? op.payload.bookId) === bookId)
+  if (relevant.some(op => op.type === 'DELETE_BOOK_ENTRIES')) return []
   const createAliases = new Map<string, string>()
   for (const op of relevant) {
     if (op.type === 'CREATE_ENTRY' && op.payload.tempId && op.payload.serverId) {

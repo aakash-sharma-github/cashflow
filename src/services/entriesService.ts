@@ -40,6 +40,15 @@ async function writeDisplayCache(userId: string, bookId: string, entries: Entry[
 // ─── Service ──────────────────────────────────────────────────
 export const entriesService = {
 
+  async deleteAllEntries(bookId: string): Promise<ApiResponse<null>> {
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) return { data: null, error: authError?.message ?? 'Not authenticated' }
+    const { error } = await supabase.rpc('delete_book_entries', { p_book_id: bookId })
+    if (error) return { data: null, error: error.message }
+    await entriesService.invalidateBookCache(bookId)
+    return { data: null, error: null }
+  },
+
   /**
    * Paginated entries for display in BookDetailScreen.
    * Page 0 result is merged into the local cache so it's available offline.
@@ -93,7 +102,7 @@ export const entriesService = {
       if (authError || !user) return { data: null, error: authError?.message ?? 'Not authenticated' }
 
       const hasPendingBookEntries = useOfflineStore.getState().pendingQueue.some(op => {
-        if (!['CREATE_ENTRY', 'UPDATE_ENTRY', 'DELETE_ENTRY'].includes(op.type)) return false
+        if (!['CREATE_ENTRY', 'UPDATE_ENTRY', 'DELETE_ENTRY', 'DELETE_BOOK_ENTRIES'].includes(op.type)) return false
         const queuedBookId = op.payload.book_id ?? op.payload.bookId
         return queuedBookId === bookId && (!op.userId || op.userId === user.id)
       })
@@ -199,7 +208,7 @@ export const entriesService = {
 
   /**
    * Batch create entries — used by CSV import.
-   * Inserts in chunks of 100.
+   * Inserts in bounded chunks to avoid a per-row request on large imports.
    */
   async batchCreateEntries(
     bookId: string,
@@ -208,7 +217,7 @@ export const entriesService = {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { inserted: 0, failed: rows.length }
 
-    const CHUNK = 100
+    const CHUNK = 500
     let inserted = 0
     let failed = 0
 

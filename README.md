@@ -1,6 +1,6 @@
 # CashFlow — Offline-First Mobile Expense Tracker
 
-> Collaborative cash book app · React Native · Expo · Supabase · Current app version: **1.4.3**
+> Collaborative cash book app · React Native · Expo · Supabase
 
 [![React Native](https://img.shields.io/badge/React_Native-0.74.5-61DAFB?logo=react)](https://reactnative.dev)
 [![Expo](https://img.shields.io/badge/Expo-51-000020?logo=expo)](https://expo.dev)
@@ -16,17 +16,19 @@
 
 **Cash Books** — Multiple ledger books per account. Cash In / Cash Out entries with notes, timestamps, and automatic running balance. Date-grouped list with sticky headers, multi-select bulk delete, and per-entry three-dot menu.
 
-**Real-Time Collaboration** — Invite members by email. All members see entry changes live via Supabase Realtime. Role-based access: owners manage members, all members create entries.
+**Real-Time Collaboration** — Invite members by email; pending invitations identify the inviter. All members see entry changes live via Supabase Realtime. Members can create and manage their own entries; book owners can also manage member entries. Push notifications go to other relevant members, not the person who made the change.
 
-**Offline-First** — Full CRUD without internet. Operations queue in AsyncStorage and replay on reconnect. JWT session cached in SecureStore — stays authenticated offline. No logout on network loss.
+**Offline-First** — Book and entry changes queue in AsyncStorage and replay on reconnect, including an owner's delete-all action. JWT session is cached in SecureStore, so a network loss does not sign the user out.
 
 **Push Notifications** — Entry changes and invitations delivered via pgmq + pg_net + Expo Push API (no Firebase server SDK). Task reminders via OS-level alarms (fire even when app is closed). Three reminder alerts per task: 3-min warning, due-time, 10-min overdue.
 
-**Export & Import** — CSV (CashBook-compatible) and PDF export with unlimited entries. CSV import with auto-format detection.
+**Export & Import** — CSV (CashBook-compatible) and PDF export with completeness checks. CSV import detects common formats and writes entries in bounded batches.
 
 **Tasks** — Offline Zustand todo list with priority levels, due dates, reminder scheduling, notes, and preview modal. User-specific storage survives logout.
 
-**Auth** — Google OAuth (profile picture synced) and Magic Link OTP. Custom dark-themed email template.
+**Auth** — Google OAuth (profile picture synced) and email one-time codes. OTP request cooldowns and rate-limit errors help prevent repeated requests.
+
+**Amounts** — Financial values use consistent thousands separators, preserve cents when present, omit trailing `.00`, and retain negative balances.
 
 **UI** — Dark / light mode with zero `StyleSheet.create()` theme violations. Spring slide-up sheets. Bottom-sheet add/edit. Fully offline-capable navigation.
 
@@ -34,15 +36,15 @@
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Framework | React Native 0.74.5 via Expo ~51 |
-| Language | TypeScript |
-| Backend | Supabase (PostgreSQL 17, Auth, Realtime, pgmq, pg_net) |
-| State | Zustand + AsyncStorage |
-| Navigation | React Navigation v6 |
-| Notifications | expo-notifications + Expo Push API + FCM |
-| Build | EAS (Expo Application Services) |
+| Layer         | Technology                                             |
+| ------------- | ------------------------------------------------------ |
+| Framework     | React Native 0.74.5 via Expo ~51                       |
+| Language      | TypeScript                                             |
+| Backend       | Supabase (PostgreSQL 17, Auth, Realtime, pgmq, pg_net) |
+| State         | Zustand + AsyncStorage                                 |
+| Navigation    | React Navigation v6                                    |
+| Notifications | expo-notifications + Expo Push API + FCM               |
+| Build         | EAS (Expo Application Services)                        |
 
 ---
 
@@ -88,11 +90,13 @@ cashflow/
 ## Getting Started
 
 ### Prerequisites
+
 - Node.js 18+ · Java 17 · Android SDK
 - `npm install -g expo-cli eas-cli`
 - Supabase project · Firebase project
 
 ### 1. Clone and install
+
 ```bash
 git clone https://github.com/aakash-sharma-github/cashflow.git
 cd cashflow
@@ -100,6 +104,7 @@ npm install
 ```
 
 ### 2. Environment variables
+
 ```env
 EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 EXPO_PUBLIC_SUPABASE_ANON_KEY=eyJ...
@@ -107,22 +112,28 @@ EXPO_PUBLIC_EAS_PROJECT_ID=your-eas-project-id
 ```
 
 ### 3. Supabase
+
 Database changes are tracked in `supabase/migrations/`. The repository contains an initial schema and later additive migrations; its filenames are not a reliable record of what has already been applied to a deployed project. For an existing project, compare the deployed migration history and schema before applying a migration. Do not run every SQL file blindly against production.
 
 Enable Google OAuth and Email OTP in Authentication → Providers, and configure the matching app redirect URLs.
 
+The collaboration permission and delete-all hardening requires applying `supabase/migrations/20261005120000_collaboration_permissions_delete_all.sql`. Apply it to the target Supabase environment before deploying the corresponding app version: it enforces author/owner entry mutation rules, provides pending invitees limited inviter-profile visibility, fixes notification actor attribution, and adds the owner-only delete-all RPC. Compare the deployed migration history first; this migration has not been applied automatically.
+
 ### 4. Firebase
+
 1. Create project at [console.firebase.google.com](https://console.firebase.google.com)
 2. Add Android app (package: `com.cashflow.cashflow`)
 3. Download `google-services.json` → place at project root
 4. Upload FCM Server Key to Expo: `eas credentials` → Android → FCM API Key
 
 ### 5. EAS setup
+
 ```bash
 eas init    # Sets projectId in app.json
 ```
 
 ### 6. Run
+
 ```bash
 npx expo start
 ```
@@ -163,7 +174,7 @@ bun run release:patch   # e.g. 1.4.3 → 1.4.4
 git diff -- app.json package.json android ios
 ```
 
-For GitHub Releases, create a tag such as `v1.4.3`, use the matching `CHANGELOG.md` section as the release notes, and attach the APK/AAB produced by the build. EAS increments production build numbers.
+For GitHub Releases, create a tag matching the released app version (currently `v1.4.4`), use the matching `CHANGELOG.md` section as the release notes, and attach the APK/AAB produced by the build. EAS increments production build numbers.
 
 ---
 
@@ -185,6 +196,8 @@ Push fanout runs in PostgreSQL and uses the Expo Push API; invitation email disp
 ## Security
 
 - Row Level Security and API grants protect application data; their definitions are maintained in the Supabase migrations.
+- Members can update or delete only entries they authored; book owners have broader entry management permissions enforced by RLS.
+- Delete-all is available to book owners and uses an owner-checked database function, including when queued offline.
 - Profile access is limited to fields used by the app and collaborators; push tokens are private.
 - Public API roles do not have `TRUNCATE` access, and entry updates are limited to editable fields.
 - JWT in hardware-backed SecureStore with chunked adapter (handles >2KB tokens)

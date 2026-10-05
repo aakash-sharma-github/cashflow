@@ -1,8 +1,8 @@
 const mockPendingQueue: any[] = []
-
 jest.mock('../supabase', () => ({
   __esModule: true,
   default: { auth: { getUser: jest.fn() }, from: jest.fn() },
+  getSessionUser: jest.fn(),
 }))
 jest.mock('@react-native-async-storage/async-storage', () => ({
   __esModule: true,
@@ -13,6 +13,7 @@ jest.mock('../../store/offlineStore', () => ({
 }))
 
 import supabase from '../supabase'
+import { getSessionUser } from '../supabase'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { entriesService } from '../entriesService'
 
@@ -50,6 +51,7 @@ describe('complete server exports', () => {
     jest.clearAllMocks()
     mockPendingQueue.splice(0)
     ;(supabase.auth.getUser as jest.Mock).mockResolvedValue({ data: { user: { id: 'user-1' } }, error: null })
+    ;(getSessionUser as jest.Mock).mockResolvedValue({ user: { id: 'user-1' }, error: null })
   })
 
   it('retrieves every page beyond 5,000 entries', async () => {
@@ -101,5 +103,21 @@ describe('complete server exports', () => {
     expect(result.data).toBeNull()
     expect(result.error).toContain('sync pending changes')
     expect(supabase.from).not.toHaveBeenCalled()
+  })
+
+  it('imports 5,000 rows in ten bounded requests of 500 rows', async () => {
+    const chunkSizes: number[] = []
+    ;(supabase.from as jest.Mock).mockImplementation(() => ({
+      insert: (rows: unknown[]) => {
+        chunkSizes.push(rows.length)
+        return { select: async () => ({ data: rows.map((_, i) => ({ id: String(i) })), error: null }) }
+      },
+    }))
+    const rows = Array.from({ length: 5000 }, () => ({
+      amount: '100.50', type: 'cash_in', note: null, entry_date: '2026-10-01T00:00:00.000Z',
+    }))
+    const result = await entriesService.batchCreateEntries('book-1', rows)
+    expect(result).toEqual({ inserted: 5000, failed: 0 })
+    expect(chunkSizes).toEqual(Array(10).fill(500))
   })
 })

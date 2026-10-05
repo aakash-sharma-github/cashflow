@@ -35,25 +35,35 @@ export default function LoginScreen({ navigation }: any) {
   const [emailFocused, setEmailFocused] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const otpRequestInFlight = React.useRef(false);
   const sendOtp = useAuthStore((s) => s.sendOtp);
   const signInWithGoogle = useAuthStore((s) => s.signInWithGoogle);
   const { mode } = useThemeStore();
   const theme = getTheme(mode);
 
   const handleSendOtp = async () => {
+    if (otpRequestInFlight.current) return;
     const trimmedEmail = email.trim().toLowerCase();
     if (!isValidEmail(trimmedEmail)) {
       themedAlert("Invalid Email", "Please enter a valid email address.");
       return;
     }
+    otpRequestInFlight.current = true;
     setLoading(true);
-    const { error } = await sendOtp(trimmedEmail);
-    setLoading(false);
-    if (error) {
-      themedAlert("Error", error);
-      return;
+    try {
+      let error: string | null = null;
+      try { ({ error } = await sendOtp(trimmedEmail)); }
+      catch (e) { error = e instanceof Error ? e.message : 'Network request failed'; }
+      if (error) {
+        const limited = /rate.?limit|too many requests/i.test(error);
+        themedAlert(limited ? "Please wait before requesting another code" : "Could not send code", error);
+        return;
+      }
+      navigation.navigate("VerifyOtp", { email: trimmedEmail });
+    } finally {
+      otpRequestInFlight.current = false;
+      setLoading(false);
     }
-    navigation.navigate("VerifyOtp", { email: trimmedEmail });
   };
 
   const handleGoogle = async () => {

@@ -34,8 +34,6 @@ import {
 } from "../components/common/ThemedAlert";
 import { compareMoney, formatAmount } from "../utils";
 import { format, isToday, isYesterday } from "date-fns";
-import { entriesService } from "../services/entriesService";
-import supabase from "../services/supabase";
 import type { Entry, EntryFilter } from "../types";
 
 // ── Constants ─────────────────────────────────────────────────
@@ -75,6 +73,7 @@ interface EntryRowProps {
   isDark: boolean;
   currency: string | undefined;
   userId: string | undefined;
+  ownerId?: string;
   surface: string;
   textColor: string;
   textTertiary: string;
@@ -91,6 +90,7 @@ const EntryRow = memo(function EntryRow({
   isDark,
   currency,
   userId,
+  ownerId,
   surface,
   textColor,
   textTertiary,
@@ -101,6 +101,7 @@ const EntryRow = memo(function EntryRow({
 }: EntryRowProps) {
   const isCashIn = e.type === "cash_in";
   const isMe = e.user_id === userId;
+  const canManage = !!userId && (isMe || ownerId === userId);
   const entryBy = e.profile?.full_name || e.profile?.email;
   const timeStr = format(new Date(e.entry_date), "h:mm a");
 
@@ -114,7 +115,7 @@ const EntryRow = memo(function EntryRow({
     <Pressable
       style={[s.entryRow, { backgroundColor: rowBg }]}
       onPress={() => onPress(e)}
-      onLongPress={() => onLongPress(e)}
+      onLongPress={() => canManage && onLongPress(e)}
       delayLongPress={350}
       android_ripple={{ color: "rgba(91,95,237,0.12)" }}
     >
@@ -160,7 +161,7 @@ const EntryRow = memo(function EntryRow({
         </View>
       </View>
 
-      {!selectMode && (
+      {!selectMode && canManage && (
         <TouchableOpacity
           onPress={() => onDotPress(e)}
           style={s.dotBtn}
@@ -208,6 +209,7 @@ export default function BookDetailScreen({ route, navigation }: any) {
     fetchEntries,
     loadMore,
     deleteEntry,
+    deleteAllEntries,
     setFilter,
   } = useEntriesStore();
   const { currentBook, fetchBook } = useBooksStore();
@@ -215,6 +217,7 @@ export default function BookDetailScreen({ route, navigation }: any) {
   const { mode } = useThemeStore();
   const theme = getTheme(mode);
   const isDark = mode === "dark";
+  const isBookOwner = !!user?.id && (currentBook?.owner_id === user.id || currentBook?.role === "owner");
 
   const [refreshing, setRefreshing] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
@@ -236,6 +239,7 @@ export default function BookDetailScreen({ route, navigation }: any) {
   const handleEntryPress = useCallback(
     (e: Entry) => {
       if (selectMode) {
+        if (e.user_id !== user?.id && !isBookOwner) return;
         setSelected((prev) => {
           const next = new Set(prev);
           if (next.has(e.id)) next.delete(e.id);
@@ -247,11 +251,12 @@ export default function BookDetailScreen({ route, navigation }: any) {
         setPreviewEntry(e);
       }
     },
-    [selectMode],
+    [selectMode, user?.id, isBookOwner],
   );
 
   const handleEntryLongPress = useCallback(
     (e: Entry) => {
+      if (e.user_id !== user?.id && !isBookOwner) return;
       if (!selectMode) {
         setSelectMode(true);
         setSelected(new Set([e.id]));
@@ -264,11 +269,12 @@ export default function BookDetailScreen({ route, navigation }: any) {
         });
       }
     },
-    [selectMode],
+    [selectMode, user?.id, isBookOwner],
   );
 
   const handleDotPress = useCallback(
     (e: Entry) => {
+      if (e.user_id !== user?.id && !isBookOwner) return;
       themedActionSheet(
         e.note || (e.type === "cash_in" ? "Cash In" : "Cash Out"),
         formatAmount(e.amount, currentBook?.currency),
@@ -309,7 +315,7 @@ export default function BookDetailScreen({ route, navigation }: any) {
         ],
       );
     },
-    [currentBook?.currency, bookId, deleteEntry, navigation],
+    [currentBook?.currency, bookId, deleteEntry, navigation, user?.id, isBookOwner],
   );
 
   const handleBookThreeDot = useCallback(() => {
@@ -322,7 +328,7 @@ export default function BookDetailScreen({ route, navigation }: any) {
             bookName: currentBook?.name,
           }),
       },
-      {
+      ...(isBookOwner ? [{
         text: "Delete All Entries",
         style: "destructive" as const,
         onPress: () =>
@@ -335,30 +341,26 @@ export default function BookDetailScreen({ route, navigation }: any) {
                 text: "Delete All",
                 style: "destructive",
                 onPress: async () => {
-                  const { error } = await supabase
-                    .from("entries")
-                    .delete()
-                    .eq("book_id", bookId);
+                  const { error } = await deleteAllEntries(bookId);
                   if (error) {
-                    themedAlert("Error", error.message);
+                    themedAlert("Error", error);
                     return;
                   }
-                  await entriesService.invalidateBookCache(bookId);
-                  fetchEntries(bookId);
                   fetchBook(bookId);
                 },
               },
             ],
             "trash-outline",
           ),
-      },
+      }] : []),
       { text: "Cancel", style: "cancel" as const },
     ]);
   }, [
     currentBook,
+    isBookOwner,
     bookId,
     entries.length,
-    fetchEntries,
+    deleteAllEntries,
     fetchBook,
     navigation,
   ]);
@@ -509,6 +511,7 @@ export default function BookDetailScreen({ route, navigation }: any) {
         isDark={isDark}
         currency={currentBook?.currency}
         userId={user?.id}
+        ownerId={currentBook?.owner_id}
         surface={theme.surface}
         textColor={theme.text}
         textTertiary={theme.textTertiary}
@@ -523,6 +526,7 @@ export default function BookDetailScreen({ route, navigation }: any) {
       selectMode,
       isDark,
       currentBook?.currency,
+      currentBook?.owner_id,
       user?.id,
       theme,
       handleEntryPress,
@@ -898,7 +902,7 @@ export default function BookDetailScreen({ route, navigation }: any) {
                   )}
 
                   {/* Action buttons */}
-                  <View style={s.previewActions}>
+                  {(previewEntry.user_id === user?.id || isBookOwner) && <View style={s.previewActions}>
                     <TouchableOpacity
                       style={[
                         s.previewEditBtn,
@@ -964,7 +968,7 @@ export default function BookDetailScreen({ route, navigation }: any) {
                         Delete
                       </Text>
                     </TouchableOpacity>
-                  </View>
+                  </View>}
                 </View>
               </View>
             );

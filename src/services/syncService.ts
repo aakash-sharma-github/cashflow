@@ -276,6 +276,15 @@ export const syncService = {
             break;
           }
 
+          case "DELETE_BOOK_ENTRIES": {
+            const bookId = payload.bookId ?? payload.book_id;
+            if (typeof bookId !== "string") throw new Error("Queued delete-all operation has no book ID");
+            const { error } = await supabase.rpc("delete_book_entries", { p_book_id: bookId });
+            if (error) throw new Error(error.message);
+            await localEntriesDb.clearBook(userId, bookId);
+            break;
+          }
+
           default:
             logger.warn("[Sync] Unknown operation type:", type);
         }
