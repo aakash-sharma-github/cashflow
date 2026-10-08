@@ -56,6 +56,10 @@ export function compareMoney(left: MoneyValue, right: MoneyValue = 0): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
 
+function groupThousands(integer: string): string {
+  return integer.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+}
+
 export function formatMoney(value: MoneyValue, currency = 'USD'): string {
   const symbols: Record<string, string> = {
     USD: '$', EUR: '€', GBP: '£', INR: '₹', AED: 'د.إ', SAR: '﷼', NPR: 'रु', BDT: '৳',
@@ -64,7 +68,9 @@ export function formatMoney(value: MoneyValue, currency = 'USD'): string {
   const cents = decimalToCents(value) ?? 0n
   const negative = cents < 0n
   const absolute = negative ? -cents : cents
-  const whole = (absolute / 100n).toLocaleString('en-US')
+  // Group the decimal string directly instead of relying on Intl/BigInt locale
+  // support, which differs across Hermes and JavaScript runtimes.
+  const whole = groupThousands(String(absolute / 100n))
   const fraction = absolute % 100n
   const decimal = fraction === 0n ? '' : `.${String(fraction).padStart(2, '0')}`
   return `${negative ? '-' : ''}${symbol}${whole}${decimal}`

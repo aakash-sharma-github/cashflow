@@ -2,7 +2,7 @@
 
 All notable changes to CashFlow are documented here.
 
-## ## [1.4.5] - 2026-10-05
+## [1.4.5] - 2026-10-05
 
 ### Added
 

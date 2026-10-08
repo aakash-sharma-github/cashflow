@@ -96,6 +96,7 @@ export async function exportEntriesAsPDF(entries: Entry[], book: Book): Promise<
   const tableRows = sorted.map(e => {
     const isCashIn = e.type === 'cash_in'
     const amount = e.amount
+    const formattedAmount = formatAmount(amount, book.currency)
     const running = runningBalances.get(e.id)!
     const entryBy = e.profile?.full_name || e.profile?.email || '—'
     const runningColor = compareMoney(running) >= 0 ? '#059669' : '#dc2626'
@@ -109,10 +110,10 @@ export async function exportEntriesAsPDF(entries: Entry[], book: Book): Promise<
         <td class="td-remark">${e.note ? esc(e.note) : '<span class="muted">—</span>'}</td>
         <td class="td-entryby">${esc(entryBy)}</td>
         <td class="td-amount ${isCashIn ? 'cash-in' : ''}">
-          ${isCashIn ? `+${book.currency} ${amount}` : ''}
+          ${isCashIn ? `+${formattedAmount}` : ''}
         </td>
         <td class="td-amount ${!isCashIn ? 'cash-out' : ''}">
-          ${!isCashIn ? `-${book.currency} ${amount}` : ''}
+          ${!isCashIn ? `-${formattedAmount}` : ''}
         </td>
         <td class="td-balance" style="color:${runningColor}">
           ${formatAmount(running, book.currency)}
